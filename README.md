@@ -1,3 +1,6 @@
+
+# iBot
+
 ## DONE 
 
 1. order_manager: send, fut/stk, lmt/mkt, cancel one, cancel all
@@ -28,4 +31,4 @@ strategy_manager: 50-70
 install the dependencies using pip:
 ```
 pip install -r requirements.txt
-```# iBot
+```

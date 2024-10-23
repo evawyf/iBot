@@ -1,5 +1,7 @@
 from ibapi.contract import Contract 
 import datetime
+from iBot.src.utils.future_contract_roll_expiry_check import get_roll_date_lastTradeDateOrContractMonth
+
 """
 Initializes contract
 """
@@ -22,7 +24,7 @@ def create_futures_contract(symbol, exchange="CME", currency="USD", lastTradeDat
     contract.currency = currency
     
     if lastTradeDateOrContractMonth is None:
-        lastTradeDateOrContractMonth = expiry_check()
+        lastTradeDateOrContractMonth = get_roll_date_lastTradeDateOrContractMonth()
     
     contract.lastTradeDateOrContractMonth = lastTradeDateOrContractMonth
     
@@ -32,14 +34,14 @@ def create_futures_contract(symbol, exchange="CME", currency="USD", lastTradeDat
     
     return contract
 
-def expiry_check():
-    current_date = datetime.datetime.now()
-    current_year = current_date.year
-    current_month = current_date.month
-    contract_months = [3, 6, 9, 12]
-    next_contract_month = min(month for month in contract_months if month > current_month) if current_month < 12 else 3
-    next_contract_year = current_year if next_contract_month > current_month else current_year + 1
-    return f"{next_contract_year}{next_contract_month:02d}"
+# def expiry_check():
+#     current_date = datetime.datetime.now()
+#     current_year = current_date.year
+#     current_month = current_date.month
+#     contract_months = [3, 6, 9, 12]
+#     next_contract_month = min(month for month in contract_months if month > current_month) if current_month < 12 else 3
+#     next_contract_year = current_year if next_contract_month > current_month else current_year + 1
+#     return f"{next_contract_year}{next_contract_month:02d}"
 
 
 def create_stock_contract(symbol, exchange="SMART", currency="USD"):
@@ -73,3 +75,4 @@ def create_option_contract(symbol, exchange="SMART", currency="USD",
           f"strike: {contract.strike}, right: {contract.right}")
     
     return contract
+

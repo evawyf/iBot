@@ -2,7 +2,7 @@ from OrderManager import IBOrderManager
 from DataRealtimeBarGenerator import IBRealtimeDataBarGenerator
 from DataHistoricalBarCollector import IBHistoricalDataCollector
 from utils.clientid_assigner import ClientIDAssigner
-from utils.exit import run_check_for_exit
+from archive.exit import run_check_for_exit
 import asyncio
 import concurrent.futures
 import time

@@ -1,5 +1,0 @@
-data_manager
-indicators
-order_manager
-strategy_boxes
-utils

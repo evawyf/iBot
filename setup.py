@@ -1,7 +1,35 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="tws-native-bot",
+    name="tws-ibot",
     version="0.1",
     packages=find_packages(),
+    install_requires=[
+        'pandas==2.2.2',
+        'numpy==1.26.4',
+        'scikit-learn==1.3.0',
+        'statsmodels==0.14.0',
+        'tensorflow==2.13.0',
+        'matplotlib==3.7.2',
+        'seaborn==0.12.2',
+        'TA-Lib==0.4.32',
+        'yfinance==0.2.28',
+        'ibapi==9.81.1.post1',
+        'jupyter==1.0.0',
+        'notebook==7.0.2',
+        'python-dateutil==2.8.2',
+        'pytz==2023.3',
+    ],
+    python_requires='>=3.6',
+    description="A native bot for Interactive Brokers TWS API",
+    long_description=open('README.md').read(),
+    long_description_content_type="text/markdown",
+    author="evawyf",
+    author_email="elvawyf1@gmail.com",
+    url="https://github.com/evawyf/iBot",
+    classifiers=[
+        "Programming Language :: Python :: 3",
+        "License :: OSI Approved :: MIT License",
+        "Operating System :: OS Independent",
+    ],
 )

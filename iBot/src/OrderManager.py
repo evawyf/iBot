@@ -2,8 +2,8 @@ from ibapi.client import EClient
 from ibapi.wrapper import EWrapper
 from ibapi.utils import iswrapper
 
-from utils.contract import create_contract
-from utils.order import create_limit_order, create_market_order
+from util_ib_contract import create_contract
+from util_ib_order import create_limit_order, create_market_order
 
 import time, threading
 from datetime import datetime

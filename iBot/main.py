@@ -1,10 +1,12 @@
-from OrderManager import IBOrderManager
+from iBot.src.OrderManager import IBOrderManager
 from DataRealtimeBarGenerator import IBRealtimeDataBarGenerator
 from DataHistoricalBarCollector import IBHistoricalDataCollector
 from utils.clientid_assigner import ClientIDAssigner
 import asyncio
 import concurrent.futures
 import time
+import keyboard
+import threading
 
 async def run_task(task):
     if await task():
@@ -20,6 +22,22 @@ async def iBot(*tasks):
 
 def run_iBot(*tasks):
     asyncio.run(iBot(*tasks))
+
+def disconnect_client(clients):
+    def on_esc():
+        client_id = input("Enter the client ID to disconnect: ")
+        for client in clients:
+            if client.client_id == int(client_id):
+                if client.isConnected():
+                    client.ib_disconnect()
+                    print(f"Client with ID {client_id} has been disconnected.")
+                else:
+                    print(f"Client with ID {client_id} is not connected.")
+                return
+        print(f"No client found with ID {client_id}.")
+
+    keyboard.add_hotkey('esc', on_esc)
+    keyboard.wait()
 
 if __name__ == "__main__":
 
@@ -93,13 +111,17 @@ if __name__ == "__main__":
     # Add historical data task to the list of tasks to be run
     tasks.append(historical_data_task)
 
+    # Start the disconnect_client function in a separate thread
+    clients = [order_manager, realtime_data, historical_data]
+    disconnect_thread = threading.Thread(target=disconnect_client, args=(clients,))
+    disconnect_thread.start()
+
     # Run all tasks parallelly
     run_iBot(*tasks)
 
     # After all tasks are completed, disconnect all clients and exit
     print("All tasks completed.")
     
-    clients = [order_manager, realtime_data, historical_data]
     for client in clients:
         if client.isConnected():
             client.ib_disconnect()

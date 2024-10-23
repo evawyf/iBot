@@ -8,7 +8,7 @@ import pytz, threading, time
 import sqlite3
 import queue
 import sys
-from utils.contract import create_contract
+from utils.ib_contract import create_contract
 from utils.barsize_valid_check import barsize_valid_check
 from utils.sqlite_helper import SQLiteHelper
 
@@ -138,7 +138,7 @@ class IBHistoricalDataCollector(EWrapper, EClient):
 if __name__ == "__main__":
     symbol = "MES"
     contract_type = "FUT"
-    frequency = "1 min"
+    frequency = "1 day"
     duration = "1 M"    
 
     app = IBHistoricalDataCollector(port=7497, client_id=1, symbol=symbol, contract_type=contract_type, frequency=frequency, duration=duration)

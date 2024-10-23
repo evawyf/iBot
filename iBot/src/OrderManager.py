@@ -2,8 +2,8 @@ from ibapi.client import EClient
 from ibapi.wrapper import EWrapper
 from ibapi.utils import iswrapper
 
-from util_ib_contract import create_contract
-from util_ib_order import create_limit_order, create_market_order
+from utils.ib_contract import create_contract
+from utils.ib_order import create_limit_order, create_market_order
 
 import time, threading
 from datetime import datetime
@@ -208,7 +208,7 @@ if __name__ == "__main__":
 
             app.place_limit_order("AAPL", "STK", "BUY", 1, 100)
 
-            time.sleep(10)
+            time.sleep(5)
             app.cancel_all_orders()
         finally:
             # Disconnect

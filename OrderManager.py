@@ -6,18 +6,28 @@ from utils.contract import create_contract
 from utils.order import create_limit_order, create_market_order
 
 import time, threading
+from datetime import datetime
+
+# Help to get OrderID as a 9 digit integer: 102214010
+def formatted_time_as_int():
+    now = datetime.now()
+    return int(now.strftime("%m%d%H%M%S"))
 
 """
 IB API wrapper
 """
 class IBOrderManager(EWrapper, EClient):
-    def __init__(self, port, client_id, max_wait_time=10):
+    def __init__(self, port, client_id, max_wait_time=30, task_name="OrderManager"):
         EClient.__init__(self, self)
         self.nextOrderId = None
-        self.task_name = "OrderManager"
         self.port = port
         self.client_id = client_id
         self.max_wait_time = max_wait_time
+        self.connection_event = threading.Event()
+        self.order_id_lock = threading.Lock()
+        self.task_name = task_name
+        self.openOrders = {}
+        self.openContracts = {}
 
     def ib_connect(self):
         # Try to connect
@@ -25,25 +35,21 @@ class IBOrderManager(EWrapper, EClient):
             self.connect('127.0.0.1', self.port, self.client_id)
         except Exception as e:
             print(f"Error connecting: {e}")
-            return None
+            return False
 
         # Start the socket in a thread
         api_thread = threading.Thread(target=self.run, daemon=True)
         api_thread.start()
 
         # Wait for nextValidId with a timeout
-        start_time = time.time()
-        while self.nextOrderId is None and time.time() - start_time < self.max_wait_time:
-            time.sleep(0.1)
-
-        if self.nextOrderId is None:
+        if not self.connection_event.wait(timeout=self.max_wait_time):
             print("Timeout waiting for nextValidId. Please check your connection.")
             self.disconnect()
-            return None
+            return False
 
         print(f"Received nextValidId: {self.nextOrderId}")
         print("Connection established.")
-
+        return True
 
     def ib_disconnect(self):
         print(f"Disconnecting client task [{self.task_name}] ...")
@@ -53,8 +59,10 @@ class IBOrderManager(EWrapper, EClient):
     @iswrapper
     def nextValidId(self, orderId: int):
         super().nextValidId(orderId)
-        self.nextOrderId = orderId
+        with self.order_id_lock:
+            self.nextOrderId = orderId
         print(f"The next valid order id is: {self.nextOrderId}")
+        self.connection_event.set()
 
     @iswrapper
     def orderStatus(self, orderId, status, filled, remaining, avgFillPrice, permId, parentId, lastFillPrice, clientId, whyHeld, mktCapPrice):
@@ -63,6 +71,8 @@ class IBOrderManager(EWrapper, EClient):
     @iswrapper
     def openOrder(self, orderId, contract, order, orderState):
         print(f"OpenOrder. ID: {orderId}, {contract.symbol}, {contract.secType} @ {contract.exchange}: {order.action}, {order.orderType} {order.totalQuantity} @ ${order.lmtPrice}")
+        self.openOrders[orderId] = order
+        self.openContracts[orderId] = contract
 
     @iswrapper
     def execDetails(self, reqId, contract, execution):
@@ -105,30 +115,37 @@ class IBOrderManager(EWrapper, EClient):
             print(f"Invalid contract: {contract.symbol}")
             return False
 
-
-
     def place_limit_order(self, symbol, contract_type, action, quantity, price):
+        with self.order_id_lock:
+            if self.nextOrderId is None:
+                print("Error: NextOrderId not received. Ensure connection is established.")
+                return
+            current_order_id = self.nextOrderId
+            self.nextOrderId += 1
+
         # Create the contract based on the type
         contract = create_contract(symbol, contract_type)
         # Create the order and place it
         order = create_limit_order(action, quantity, price)
-        self.placeOrder(self.nextOrderId, contract, order)
-        self.nextOrderId += 1
-
+        self.placeOrder(current_order_id, contract, order)
 
     def place_market_order(self, symbol, contract_type, action, quantity):
+        with self.order_id_lock:
+            if self.nextOrderId is None:
+                print("Error: NextOrderId not received. Ensure connection is established.")
+                return
+            current_order_id = self.nextOrderId
+            self.nextOrderId += 1
+
         # Create the contract based on the type
         contract = create_contract(symbol, contract_type)
         # Create the order and place it
         order = create_market_order(action, quantity)
-        self.placeOrder(self.nextOrderId, contract, order)  
-        self.nextOrderId += 1
-
+        self.placeOrder(current_order_id, contract, order)
 
     def cancel_order_by_details(self, symbol, action, price):
         # Iterate through open orders to find a match
-        for orderId in self.openOrders:
-            order = self.openOrders[orderId]
+        for orderId, order in self.openOrders.items():
             contract = self.openContracts[orderId]
             
             if (contract.symbol == symbol and 
@@ -143,35 +160,13 @@ class IBOrderManager(EWrapper, EClient):
         return False
     
     def cancel_all_orders(self):
-        if hasattr(self, 'openOrders'):
+        if self.openOrders:
             for orderId in list(self.openOrders.keys()):
                 print(f"Cancelling order: ID {orderId}")
                 self.cancelOrder(orderId)
             print("All open orders have been cancelled.")
         else:
             print("No open orders to cancel.")
-            
-
-    @iswrapper
-    def openOrder(self, orderId, contract, order, orderState):
-        # Call the parent class method
-        super().openOrder(orderId, contract, order, orderState)
-        
-        # Initialize dictionaries if they don't exist
-        if not hasattr(self, 'openOrders'):
-            self.openOrders = {}
-        if not hasattr(self, 'openContracts'):
-            self.openContracts = {}
-        
-        # Store the order and contract information
-        self.openOrders[orderId] = order
-        self.openContracts[orderId] = contract
-        
-        # Print order details
-        print(f"OpenOrder. ID: {orderId}, {contract.symbol}, {contract.secType} @ {contract.exchange}: {order.action}, {order.orderType} {order.totalQuantity} @ ${order.lmtPrice}")
-
-    # Note: The openOrder function is called by the IB API when an order is placed or its status changes.
-    # It keeps track of open orders and their associated contracts, which is used by cancelOrderByDetails.
 
 
 
@@ -183,29 +178,28 @@ if __name__ == "__main__":
     PRICE = 200
 
     app = IBOrderManager(PORT, 1)
-    app.ib_connect()
+    if app.ib_connect():
+        try:
+            # Your IB tasks go here
+            # For example:
+            app.place_limit_order("MES", "FUT", "BUY", 1, PRICE)
+            
+            # Wait for 5 seconds (or adjust as needed)
+            time.sleep(5)
 
-    # Your IB tasks go here
-    # For example:
-    app.place_limit_order("MES", "FUT", "BUY", 1, PRICE)
-    
-    # Wait for 5 seconds (or adjust as needed)
-    time.sleep(5)
+            for i in range(1, 6):
+                app.place_limit_order("MES", "FUT", "BUY", 1, PRICE + i)
+                time.sleep(1)
+            
+            # Cancel the order
+            app.cancel_order_by_details("MES", "BUY", PRICE)
 
-    for i in range(1, 6):
-        app.place_limit_order("MES", "FUT", "BUY", 1, PRICE + i)
-        time.sleep(1)
-    
-    # Cancel the order
-    app.cancel_order_by_details("MES", "BUY", PRICE)
+            app.place_limit_order("AAPL", "STK", "BUY", 1, 100)
 
-    # Don't forget to disconnect when done
-    # app.disconnect()
-
-    app.place_limit_order("AAPL", "STK", "BUY", 1, 100)
-
-    time.sleep(10)
-    app.cancel_all_orders()
-
-    # Disconnect
-    app.ib_disconnect()
+            time.sleep(10)
+            app.cancel_all_orders()
+        finally:
+            # Disconnect
+            app.ib_disconnect()
+    else:
+        print("Failed to connect to TWS.")

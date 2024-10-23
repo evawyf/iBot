@@ -7,8 +7,10 @@ import pandas as pd
 import pytz, threading, time
 import sqlite3
 import queue
+import sys
 from utils.contract import create_contract
 from utils.barsize_valid_check import barsize_valid_check
+from utils.sqlite_helper import SQLiteHelper
 
 
 class IBHistoricalDataCollector(EWrapper, EClient):
@@ -30,16 +32,16 @@ class IBHistoricalDataCollector(EWrapper, EClient):
         self.db_name = f"data/HistoricalData_{self.symbol}_{self.contract_type}_{self.frequency.replace(' ', '')}_{datetime.now().strftime('%Y%m%d')}.db"
         print(f"Using SQLite for historical data storage: {self.db_name}")
 
-        self.sqlite_queue = queue.Queue()
-        # Start SQLite worker thread
-        self.sqlite_thread = threading.Thread(target=self.sqlite_worker, daemon=True)
-        self.sqlite_thread.start()
+        self.sqlite_helper = SQLiteHelper(self.db_name)
 
     def historicalData(self, reqId, bar):
-        self.data.append([bar.date, bar.open, bar.high, bar.low, bar.close, bar.volume])
+        self.data.append([bar.date, self.symbol, bar.open, bar.high, bar.low, bar.close, bar.volume])
+        self.sqlite_helper.queue_insert((
+            bar.date, self.symbol, bar.open, bar.high, bar.low, bar.close, bar.volume
+        ))
 
     def historicalDataEnd(self, reqId, start, end):
-        print(f"Historical data retrieval completed. {start} - {end}")
+        print(f"\nHistorical data retrieval completed. {start} - {end}")
         self.event.set()
 
     def error(self, reqId, errorCode, errorString):
@@ -75,10 +77,9 @@ class IBHistoricalDataCollector(EWrapper, EClient):
             super().disconnect()
         
         # Signal SQLite thread to close
-        self.sqlite_queue.put(("CLOSE", None))
-        self.sqlite_thread.join()  # Wait for SQLite thread to finish
+        self.sqlite_helper.close()
 
-    def get_historical_data(self):
+    def start(self):
         """
         symbol:str - The symbol of the contract to retrieve historical data for.
         contract_type:str - The type of contract to retrieve historical data for.
@@ -93,7 +94,7 @@ class IBHistoricalDataCollector(EWrapper, EClient):
         self.event.clear()  # Reset the event
 
         # Request historical data
-        print(f"Requesting historical data for {self.symbol}...")  # Fixed: Use self.symbol instead of symbol
+        print(f"Requesting historical data for {self.symbol}...")
 
         # Calculate end time (current time) in US/Eastern timezone and format it correctly
         end_time = datetime.now(pytz.timezone('US/Eastern')).strftime("%Y%m%d-%H:%M:%S")
@@ -113,7 +114,7 @@ class IBHistoricalDataCollector(EWrapper, EClient):
             chartOptions=[]
         )
 
-        print(f"Fetching historical data for {self.symbol} with {self.frequency} bars.")  # Fixed: Use self.symbol and self.frequency
+        print(f"Fetching historical data for {self.symbol} with {self.frequency} bars.")
 
         # Wait for data to be collected
         self.event.wait(timeout=60)  # Wait up to 60 seconds for data
@@ -122,51 +123,7 @@ class IBHistoricalDataCollector(EWrapper, EClient):
             print("No data received within the timeout period.")
             return None
 
-        return pd.DataFrame(self.data, columns=['date', 'open', 'high', 'low', 'close', 'volume'])
-    
-    def sqlite_worker(self):
-        """
-        Worker function for handling SQLite operations in a separate thread.
-        """
-        with sqlite3.connect(self.db_name) as sqlite_db:
-            self.create_sqlite_table(sqlite_db)
-            
-            while True:
-                try:
-                    operation, args = self.sqlite_queue.get()
-                    if operation == "INSERT":
-                        self.insert_data_to_sqlite(sqlite_db, args)
-                    elif operation == "CLOSE":
-                        break
-                except Exception as e:
-                    print(f"SQLite error: {e}")
-                finally:
-                    self.sqlite_queue.task_done()
-    
-    def create_sqlite_table(self, db):
-        """
-        Create the SQLite table for storing historical data if it doesn't exist.
-        """
-        cursor = db.cursor()
-        cursor.execute('''
-        CREATE TABLE IF NOT EXISTS historical_data (
-            date TEXT PRIMARY KEY,
-            open REAL,
-            high REAL,
-            low REAL,
-            close REAL,
-            volume INTEGER
-        )
-        ''')
-        db.commit()
-    
-    def insert_data_to_sqlite(self, db, args):
-        """
-        Insert historical data into the SQLite database.
-        """
-        db_name, df = args
-        df.to_sql('historical_data', db, if_exists='replace', index=False)
-        db.commit()
+        return pd.DataFrame(self.data, columns=['date', 'symbol', 'open', 'high', 'low', 'close', 'volume'])
     
     def write_historical_data_to_sqlite(self, df):
         """
@@ -176,9 +133,7 @@ class IBHistoricalDataCollector(EWrapper, EClient):
         """
         
         # Add the task to the SQLite queue
-        self.sqlite_queue.put(("INSERT", (self.db_name, df)))
-        
-        print(f"Historical data for {self.symbol} {self.contract_type} with {self.frequency} frequency has been queued for writing to {self.db_name}")
+        self.sqlite_helper.queue_insert(df)
 
 if __name__ == "__main__":
     symbol = "MES"
@@ -186,10 +141,10 @@ if __name__ == "__main__":
     frequency = "1 min"
     duration = "1 M"    
 
-    app = IBHistoricalDataCollector(port=7497, client_id=0, symbol=symbol, contract_type=contract_type, frequency=frequency, duration=duration)
+    app = IBHistoricalDataCollector(port=7497, client_id=1, symbol=symbol, contract_type=contract_type, frequency=frequency, duration=duration)
     if app.ib_connect():
         try:
-            df = app.get_historical_data()
+            df = app.start()
             if df is not None and not df.empty:
                 df['date'] = pd.to_datetime(df['date'])
                 df.set_index('date', inplace=True)

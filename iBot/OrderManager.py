@@ -70,7 +70,18 @@ class IBOrderManager(EWrapper, EClient):
 
     @iswrapper
     def openOrder(self, orderId, contract, order, orderState):
-        print(f"OpenOrder. ID: {orderId}, {contract.symbol}, {contract.secType} @ {contract.exchange}: {order.action}, {order.orderType} {order.totalQuantity} @ ${order.lmtPrice}")
+        # The openOrder function may be called multiple times for the same order
+        # This can happen when the order status changes or when TWS is providing updates
+        # It's normal behavior and not necessarily an error
+        print(f"OpenOrder. ID: {orderId}, {contract.symbol}, {contract.secType} @ {contract.exchange}: {order.action}, {order.orderType} Qty: {order.totalQuantity} @ ${order.lmtPrice}")
+        print(f"Order State: {orderState.status}")  # Print the order state to see why it might be called multiple times
+        
+        # We store open orders and their corresponding contracts in separate dictionaries
+        # This allows us to:
+        # 1. Keep track of all open orders
+        # 2. Easily access order details and contract information for each open order
+        # 3. Efficiently cancel orders or modify them if needed
+        # 4. Provide a quick way to check if an order is still open
         self.openOrders[orderId] = order
         self.openContracts[orderId] = contract
 
@@ -114,6 +125,7 @@ class IBOrderManager(EWrapper, EClient):
         else:
             print(f"Invalid contract: {contract.symbol}")
             return False
+        
 
     def place_limit_order(self, symbol, contract_type, action, quantity, price):
         with self.order_id_lock:

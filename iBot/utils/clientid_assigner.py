@@ -13,17 +13,17 @@ class ClientIDAssigner:
         task = task_name.lower()
         # Assign client IDs based on the task name
         if "account" in task:
-            self.assign_client_id_range(task_name, 1000, 1999)
+            self.assign_client_id_range(task_name, 10, 19)
         elif "order" in task:
-            self.assign_client_id_range(task_name, 2000, 2999)
+            self.assign_client_id_range(task_name, 20, 29)
         elif "data" in task:
-            self.assign_client_id_range(task_name, 3000, 3999)
+            self.assign_client_id_range(task_name, 30, 39)
         elif "indicator" in task:
-            self.assign_client_id_range(task_name, 5000, 5999)
+            self.assign_client_id_range(task_name, 50, 59)
         elif "strategy" in task:
-            self.assign_client_id_range(task_name, 6000, 6999)
+            self.assign_client_id_range(task_name, 60, 69)
         else:
-            self.assign_client_id_range(task_name, 9000, 9999)  # Default range for unspecified tasks
+            self.assign_client_id_range(task_name, 90, 99)  # Default range for unspecified tasks
 
     
     def assign_client_id_range(self, task_name, start, end):

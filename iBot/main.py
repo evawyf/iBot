@@ -2,21 +2,20 @@ from OrderManager import IBOrderManager
 from DataRealtimeBarGenerator import IBRealtimeDataBarGenerator
 from DataHistoricalBarCollector import IBHistoricalDataCollector
 from utils.clientid_assigner import ClientIDAssigner
-from archive.exit import run_check_for_exit
 import asyncio
 import concurrent.futures
 import time
 
 async def run_task(task):
-    if await task.ib_connect():
-        await task.start()
+    if await task():
+        print(f"[INFO] {task.__name__} completed successfully.")
     else:
-        print(f"[ERROR] {task.__class__.__name__} failed to connect to TWS.")
+        print(f"[ERROR] {task.__name__} failed.")
 
 async def iBot(*tasks):
     loop = asyncio.get_event_loop()
     with concurrent.futures.ThreadPoolExecutor() as executor:
-        futures = [loop.run_in_executor(executor, run_task, task) for task in tasks]
+        futures = [loop.run_in_executor(executor, asyncio.run, run_task(task)) for task in tasks]
         await asyncio.gather(*futures)
 
 def run_iBot(*tasks):
@@ -39,54 +38,60 @@ if __name__ == "__main__":
     tasks = []
 
     # Define a task for the order manager
-    def order_manager_task(order_manager, price):
+    async def order_manager_task():
         if order_manager.ib_connect():
             try:
-                order_manager.place_limit_order("MES", "FUT", "BUY", 1, price)
-                time.sleep(10)
+                order_manager.place_limit_order("MES", "FUT", "BUY", 1, PRICE)
+                await asyncio.sleep(10)
                 for i in range(1, 6):
-                    order_manager.place_limit_order("MES", "FUT", "BUY", 1, price + i)
-                    time.sleep(1)
-                order_manager.cancel_order_by_details("MES", "BUY", price)
-                time.sleep(10)
+                    order_manager.place_limit_order("MES", "FUT", "BUY", 1, PRICE + i)
+                    await asyncio.sleep(1)
+                order_manager.cancel_order_by_details("MES", "BUY", PRICE)
+                await asyncio.sleep(10)
                 order_manager.cancel_all_orders()
+                return True
             finally:
                 order_manager.ib_disconnect()
         else:
-            print("[ERROR] Failed to connect to TWS.")
+            print("[ERROR] Order manager failed to connect to TWS.")
+            return False
 
     # Add order manager task to the list of tasks to be run
-    tasks.append(lambda: order_manager_task(order_manager, PRICE))
+    tasks.append(order_manager_task)
 
     # Test the realtime data manager
-    def realtime_data_task(realtime_data):
+    async def realtime_data_task():
         if realtime_data.ib_connect():
             try:
                 realtime_data.start()
-                time.sleep(60)  # Run for 60 seconds
+                await asyncio.sleep(60)  # Run for 60 seconds
+                return True
             finally:
                 realtime_data.stop()
                 realtime_data.ib_disconnect()
         else:
-            print("[ERROR] realtime_data Failed to connect to TWS.")
+            print("[ERROR] Realtime data failed to connect to TWS.")
+            return False
 
     # Add realtime data task to the list of tasks to be run
-    tasks.append(lambda: realtime_data_task(realtime_data))
+    tasks.append(realtime_data_task)
 
     # Test the historical data collector
-    def historical_data_task(historical_data):
+    async def historical_data_task():
         if historical_data.ib_connect():
             try:
                 historical_data.start()
-                time.sleep(60)  # Run for 60 seconds
+                await asyncio.sleep(60)  # Run for 60 seconds
+                return True
             finally:
                 historical_data.stop()
                 historical_data.ib_disconnect()
         else:
-            print("[ERROR] historical_data Failed to connect to TWS.")
+            print("[ERROR] Historical data failed to connect to TWS.")
+            return False
 
     # Add historical data task to the list of tasks to be run
-    tasks.append(lambda: historical_data_task(historical_data))
+    tasks.append(historical_data_task)
 
     # Run all tasks parallelly
     run_iBot(*tasks)

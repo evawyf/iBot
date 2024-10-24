@@ -30,5 +30,11 @@ def create_market_order(action, totalQuantity, eTradeOnly=False, firmQuoteOnly=F
           f"orderType: {order.orderType}")
     return order
 
-
+def create_order(order_type, action, totalQuantity, price=0):
+    if order_type == "MKT":
+        return create_market_order(action, totalQuantity)
+    elif order_type == "LMT":
+        return create_limit_order(action, totalQuantity, price)
+    else:
+        raise ValueError(f"Invalid order type: {order_type}")
 

@@ -53,6 +53,8 @@ def get_default_exchange(symbol):
 
 
 def create_contract(symbol, contract_type, exchange=None):
+    if contract_type == "FUT":
+        symbol = symbol[:-2] if symbol[-1] == '!' and symbol[-2].isdigit() else symbol
     if exchange is None:
         exchange = get_default_exchange(symbol)
 

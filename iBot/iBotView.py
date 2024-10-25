@@ -6,7 +6,7 @@ from ibapi.wrapper import EWrapper
 from threading import Thread, Lock
 from src.utils.ib_contract import create_contract
 from src.utils.ib_order import create_order
-from iBot.src.strategies.tv_signal_overlays_helper import signal_overlay_strategy_quantity_adjustment
+from src.strategies.tv_signal_overlays_helper import signal_overlay_strategy_quantity_adjustment
 
 import sys
 import time
@@ -32,6 +32,7 @@ Example:
 
 IB_PORT = 7497
 WEBHOOK_PORT = 5678
+DEFAULT_QUANTITY = 2
 
 app = Flask(__name__)
 
@@ -130,7 +131,9 @@ class IBotView(EWrapper, EClient):
         return self.positions[symbol]
 
     # For any confirmation, just open position (or reverse position)
-    def strategy_simply_reverse(self, symbol, contract_type, exchange, action, order_type, price, quantity, reverse_position=True):
+    def strategy_simply_reverse(self, symbol, contract_type, exchange, 
+                                action, order_type, price, quantity, default_quantity,
+                                reverse_position_potential):
         if not self.is_connected:
             self.ib_connect()  # Attempt to reconnect if not connected
 
@@ -138,12 +141,12 @@ class IBotView(EWrapper, EClient):
 
         # Get current position from filled orders
         current_position = self.get_current_position(symbol)
-        print(f"Current position for {symbol}: {current_position}")
+        print(f"Current position for {symbol}: {current_position}. Default quantity: {DEFAULT_QUANTITY}")
 
         contract, order, adjusted_quantity = signal_overlay_strategy_quantity_adjustment(current_position, 
                                                                                          symbol, contract_type, exchange, order_type, 
-                                                                                         action, price, quantity, 
-                                                                                         reverse_position=True)
+                                                                                         action, price, quantity, default_quantity,
+                                                                                         reverse_position_potential)
 
         # Place order on IBKR
         order_id = self.nextOrderId
@@ -199,13 +202,16 @@ def webhook():
     order_type = data.get('order', None) # MKT, LMT, (TODO: STP, TRAIL, FIXED, PARKED
     action = data.get('action', None) # BUY, SELL
     price = float(data.get('price', 0))
-    quantity = int(float(data.get('quantity', "0")))
+    quantity = DEFAULT_QUANTITY # int(float(data.get('quantity', "0")))
 
     reason = data.get('reason', None) # Open-Long, Open-Short, Close-Long, Close-Short
     reverse_position_potential = True if reason.lower().startswith('open') else False
 
     try:
-        result, status_code = ibkr.strategy_simply_reverse(symbol, contract_type, exchange, action, order_type, price, quantity, reverse_position_potential=True)
+        result, status_code = ibkr.strategy_simply_reverse(symbol, 
+                                                           contract_type, exchange, action, 
+                                                           order_type, price, quantity, 
+                                                           reverse_position_potential)
         return result, status_code
     except ConnectionError as e:
         print(f"Connection error: {e}")

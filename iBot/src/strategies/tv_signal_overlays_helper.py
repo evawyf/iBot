@@ -51,12 +51,15 @@ def signal_overlay_strategy_quantity_adjustment(
     if not isinstance(reverse_position_potential, bool):
         raise ValueError("reverse_position_potential must be a boolean")
 
-    if reverse_position_potential: # open-long/open-short situation
-        if (current_position > 0 and action == "SELL") or (current_position < 0 and action == "BUY"): # Reverse position situation
+    if reverse_position_potential: 
+        if (current_position >= 0 and action == "SELL") or (current_position <= 0 and action == "BUY"): 
+            # open-long/open-short situation, or first time entering position (current_position == 0)
             adjusted_quantity = default_quantity + abs(current_position)
         else:
-            adjusted_quantity = quantity # Not reversing position, same direction position, just simply add quantity
-    else: # close-long/close-short situation
+            # Not reversing position, same direction position, just simply add quantity
+            adjusted_quantity = quantity 
+    else: 
+        # close-long/close-short situation
         adjusted_quantity = min(quantity, abs(current_position))
 
     try:

@@ -7,6 +7,7 @@ from utils.ib_order import create_limit_order, create_market_order
 
 import time, threading
 from datetime import datetime
+import random
 
 # Help to get OrderID as a 9 digit integer: 102214010
 def formatted_time_as_int():
@@ -17,11 +18,11 @@ def formatted_time_as_int():
 IB API wrapper
 """
 class IBOrderManager(EWrapper, EClient):
-    def __init__(self, port, client_id, max_wait_time=30, task_name="OrderManager"):
+    def __init__(self, port, max_wait_time=30, task_name="OrderManager"):
         EClient.__init__(self, self)
         self.nextOrderId = None
         self.port = port
-        self.client_id = client_id
+        self.client_id = random.randint(1000, 1999)
         self.max_wait_time = max_wait_time
         self.connection_event = threading.Event()
         self.order_id_lock = threading.Lock()
@@ -189,7 +190,7 @@ if __name__ == "__main__":
     PORT = 7497
     PRICE = 200
 
-    app = IBOrderManager(PORT, 1)
+    app = IBOrderManager(PORT)
     if app.ib_connect():
         try:
             # Your IB tasks go here
@@ -209,7 +210,20 @@ if __name__ == "__main__":
             app.place_limit_order("AAPL", "STK", "BUY", 1, 100)
 
             time.sleep(5)
+
+
+            print("Test MGC now")
+            app.place_limit_order("MGC", "FUT", "BUY", 1, 100)  
+            time.sleep(1)
+            app.place_market_order("MGC", "FUT", "BUY", 1)
+            time.sleep(1)
+            app.place_limit_order("AAPL", "STK", "SELL", 1, 100)
+            time.sleep(5)
+            app.place_market_order("MGC", "FUT", "SELL", 1)
+            time.sleep(1)
+            
             app.cancel_all_orders()
+
         finally:
             # Disconnect
             app.ib_disconnect()

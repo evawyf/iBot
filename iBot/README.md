@@ -2,19 +2,6 @@
 
 iBot is a trading bot that uses the Interactive Brokers API to automate trading strategies.
 
-## Requirements
-
-- Python 3.6+
-- Interactive Brokers account
-- Interactive Brokers Trader Workstation (TWS) or IB Gateway
-
-### Python Dependencies
-
-- ibapi>=9.81.1,<10.0
-- pandas>=1.0.0
-- numpy>=1.18.0
-- (Add any other dependencies your project uses)
-
 ## Installation
 
 1. Clone the repository:

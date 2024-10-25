@@ -25,7 +25,7 @@ def create_market_order(action, totalQuantity, eTradeOnly=False, firmQuoteOnly=F
     # Explicitly set eTradeOnly and firmQuoteOnly
     order.eTradeOnly = eTradeOnly
     order.firmQuoteOnly = firmQuoteOnly
-    print(f"[MKT Order]created with action: {order.action}, "
+    print(f"[MKT Order] created with action: {order.action}, "
           f"totalQuantity: {order.totalQuantity}, "
           f"orderType: {order.orderType}")
     return order

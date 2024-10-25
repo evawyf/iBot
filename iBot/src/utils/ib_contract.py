@@ -7,13 +7,61 @@ from datetime import date, datetime, timedelta
 Initializes contract
 """
 
-def create_contract(symbol, contract_type):
+def get_default_exchange(symbol):
+    """
+    Maps symbols to their most popular exchanges.
+    """
+    exchange_map = {
+        # US Stocks
+        "AAPL": "NASDAQ",
+        "MSFT": "NASDAQ",
+        "GOOGL": "NASDAQ",
+        "AMZN": "NASDAQ",
+        "FB": "NASDAQ",
+        "TSLA": "NASDAQ",
+        "JPM": "NYSE",
+        "JNJ": "NYSE",
+        "V": "NYSE",
+        "PG": "NYSE",
+        
+        # US Futures
+        "ES": "CME",
+        "MES": "CME",
+        "NQ": "CME",
+        "CL": "NYMEX",
+        "GC": "COMEX",
+        "MGC": "COMEX",
+        "SI": "COMEX",
+        "ZB": "CBOT",
+        "ZN": "CBOT",
+        "ZC": "CBOT",
+        "ZS": "CBOT",
+        "6E": "CME",
+        
+        # Non-US Stocks
+        "BABA": "NYSE",  # Alibaba (China)
+        "TSM": "NYSE",   # Taiwan Semiconductor
+        "ASML": "NASDAQ",  # ASML Holding (Netherlands)
+        "SAP": "NYSE",   # SAP SE (Germany)
+        
+        # Cryptocurrencies
+        "BTCUSD": "COINBASE",
+        "ETHUSD": "COINBASE"
+    }
+    
+    return exchange_map.get(symbol, "SMART")  # Default to SMART if not found
+
+
+def create_contract(symbol, contract_type, exchange=None):
+    if exchange is None:
+        exchange = get_default_exchange(symbol)
+
     if contract_type == "FUT":
-        return create_futures_contract(symbol)
+        return create_futures_contract(symbol, exchange)
     elif contract_type == "STK":
-        return create_stock_contract(symbol)
+        return create_stock_contract(symbol, exchange)
     elif contract_type == "OPT":
-        return create_option_contract(symbol)
+        return create_option_contract(symbol, exchange)
     else:
         raise ValueError(f"Invalid contract type: {contract_type}")
 
@@ -121,4 +169,6 @@ if __name__ == "__main__":
     # Example usage of get_roll_date_lastTradeDateOrContractMonth
     print(f"\nCurrent date: {datetime.now().date()}")
     print(f"lastTradeDateOrContractMonth: {get_roll_date_lastTradeDateOrContractMonth()}")
+
+
 

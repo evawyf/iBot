@@ -6,6 +6,7 @@ from ibapi.wrapper import EWrapper
 from threading import Thread, Lock
 from src.utils.ib_contract import create_contract
 from src.utils.ib_order import create_order
+from iBot.src.strategies.tv_signal_overlays_helper import signal_overlay_strategy_quantity_adjustment
 
 import sys
 import time
@@ -18,7 +19,8 @@ import os
 Main Flask app, receives requests from TradingView and places orders on IBKR
 
 Usage: python iBotView.py <webhook_port> <port> <client_id> 
-Note: <webhook_port> defaults to 5678 if not provided, as this is required for webhook to work, otherwise it will run on default port 5000 which will not work. 
+Note: <webhook_port> defaults to 5678 if not provided, as this is required for webhook to work, 
+        otherwise it will run on default port 5000 which will not work. 
 
 Example: 
     python iBotView.py 5678                     # Paper Trading 7497, default client_id=999  
@@ -36,7 +38,7 @@ app = Flask(__name__)
 class IBotView(EWrapper, EClient):
     def __init__(self, port=IB_PORT):
         EClient.__init__(self, self)
-        self.positions = {}
+        self.positions = {}  # Changed from 0 to an empty dictionary
         self.port = int(port) if port else IB_PORT
         self.client_id = random.randint(8000, 8999)
         self.nextOrderId = 0
@@ -115,19 +117,20 @@ class IBotView(EWrapper, EClient):
         print(f"Current time from server: {time}")
 
     def get_current_position(self, symbol):
+        if symbol not in self.positions:
+            self.positions[symbol] = 0
         orders = self.redis.keys("order:*")
-        position = 0
         for order_key in orders:
             order_data = self.redis.hgetall(order_key)
             if order_data[b'symbol'].decode() == symbol and float(order_data[b'filled']) > 0:
                 if order_data[b'action'].decode() == 'BUY':
-                    position += int(float(order_data[b'filled']))
+                    self.positions[symbol] += int(float(order_data[b'filled']))
                 else:
-                    position -= int(float(order_data[b'filled']))
-        return position
+                    self.positions[symbol] -= int(float(order_data[b'filled']))
+        return self.positions[symbol]
 
     # For any confirmation, just open position (or reverse position)
-    def strategy_simply_reverse(self, symbol, contract_type, exchange, action, order_type, price, quantity):
+    def strategy_simply_reverse(self, symbol, contract_type, exchange, action, order_type, price, quantity, reverse_position=True):
         if not self.is_connected:
             self.ib_connect()  # Attempt to reconnect if not connected
 
@@ -137,37 +140,17 @@ class IBotView(EWrapper, EClient):
         current_position = self.get_current_position(symbol)
         print(f"Current position for {symbol}: {current_position}")
 
-        if quantity == 0 or quantity < 0 or quantity is None: 
-            quantity = 1
-
-        if (action == 'BUY' and current_position >= 0) or (action == 'SELL' and current_position <= 0):
-            order_quantity = quantity
-        elif (action == 'BUY' and current_position <= 0) or (action == 'SELL' and current_position >= 0):
-            order_quantity = abs(current_position) + quantity
-        else:
-            raise ValueError(f"Invalid action: {action} with current position: {current_position}")
-        
-        print(f"After adjustment, order quantity: {order_quantity}.")
-
-        # Create contract
-        try:
-            contract = create_contract(symbol=symbol, contract_type=contract_type, exchange=exchange)
-        except Exception as e:
-            print(f"Error creating contract: {e}")
-            return "Contract creation failed", 400
-        
-        try:
-            order = create_order(order_type=order_type, action=action, totalQuantity=order_quantity, price=price) 
-        except Exception as e:
-            print(f"Error creating order: {e}")
-            return "Order creation failed", 400
+        contract, order, adjusted_quantity = signal_overlay_strategy_quantity_adjustment(current_position, 
+                                                                                         symbol, contract_type, exchange, order_type, 
+                                                                                         action, price, quantity, 
+                                                                                         reverse_position=True)
 
         # Place order on IBKR
         order_id = self.nextOrderId
         self.nextOrderId += 1
         try:
             self.placeOrder(order_id, contract, order)
-            self.record_order(order_id, symbol, contract_type, action, order_type, order_quantity, price)
+            self.record_order(order_id, symbol, contract_type, action, order_type, adjusted_quantity, price)
         except Exception as e:
             print(f"Error placing order: {e}")
             return "Order placement failed", 400
@@ -219,9 +202,10 @@ def webhook():
     quantity = int(float(data.get('quantity', "0")))
 
     reason = data.get('reason', None) # Open-Long, Open-Short, Close-Long, Close-Short
+    reverse_position_potential = True if reason.lower().startswith('open') else False
 
     try:
-        result, status_code = ibkr.strategy_simply_reverse(symbol, contract_type, exchange, action, order_type, price, quantity)
+        result, status_code = ibkr.strategy_simply_reverse(symbol, contract_type, exchange, action, order_type, price, quantity, reverse_position_potential=True)
         return result, status_code
     except ConnectionError as e:
         print(f"Connection error: {e}")

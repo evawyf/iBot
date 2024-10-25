@@ -16,17 +16,16 @@
 
 ## MicroFamily
 
-| **Symbol** | **Contract**                      | **Tick Size**   | **Tick Value** | **Approximate Initial Margin** |
-|------------|-----------------------------------|-----------------|----------------|---------------------------------|
-| **MES**    | Micro E-mini S&P 500              | 0.25 points     | $1.25          | $1,200 - $1,500                |
-| **MNQ**    | Micro E-mini Nasdaq-100           | 0.25 points     | $0.50          | $1,500 - $2,000                |
-| **MGC**    | Micro Gold                        | 0.10 points     | $1.00          | $1,000 - $1,200                |
-| **MCL**    | Micro Crude Oil                   | 0.01 points     | $1.00          | $1,000 - $1,200                |
-| **MBT**    | Micro Bitcoin                     | 5 points        | $0.50          | $2,000 - $2,500                |
-| **MYM**    | Micro E-mini Dow                  | 1 point         | $0.50          | $700 - $1,000                  |
-| **M2K**    | Micro E-mini Russell 2000         | 0.10 points     | $0.50          | $600 - $900                    |
+| **Symbol** | **Contract**                      | **Exchange**            | **Tick Size**   | **Tick Value** | **Approximate Initial Margin** |
+|------------|-----------------------------------|-------------------------|-----------------|----------------|---------------------------------|
+| **MES**    | Micro E-mini S&P 500              | CME (Chicago Mercantile Exchange) | 0.25 points     | $1.25          | $1,200 - $1,500                |
+| **MNQ**    | Micro E-mini Nasdaq-100           | CME                     | 0.25 points     | $0.50          | $1,500 - $2,000                |
+| **MGC**    | Micro Gold                        | COMEX (Commodity Exchange) | 0.10 points     | $1.00          | $1,000 - $1,200                |
+| **MCL**    | Micro Crude Oil                   | NYMEX (New York Mercantile Exchange) | 0.01 points     | $1.00          | $1,000 - $1,200                |
+| **MBT**    | Micro Bitcoin                     | CME                     | 5 points        | $0.50          | $2,000 - $2,500                |
+| **MYM**    | Micro E-mini Dow                  | CME                     | 1 point         | $0.50          | $700 - $1,000                  |
+| **M2K**    | Micro E-mini Russell 2000         | CME                     | 0.10 points     | $0.50          | $600 - $900                    |
 
-These values give you a general idea, but for exact and up-to-date figures, it's best to check with your broker, as margins may vary based on volatility and risk settings.
 
 ## PORT assign
 

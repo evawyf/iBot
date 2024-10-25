@@ -7,14 +7,20 @@ app = Flask(__name__)
 
 # Define a route for the webhook to receive TradingView alerts
 @app.route('/webhook', methods=['POST'])
-def webhook():
+def webhook(app):
     data = request.json  # Get the JSON data sent by TradingView
     print("Received data:", json.dumps(data, indent=2))  # Print data for debugging
 
     # # Example: You can parse the 'ticker' and 'action' (buy/sell) from the alert
     ticker = data.get('ticker', None)
     action = data.get('action', None)
-    price = data.get('price', None)
+
+    # Example: You can place an order on IBKR
+    # if action == 'buy':
+    #     ibkr.placeOrder(1, create_contract(ticker), create_order("MKT", "BUY", 100))
+    # elif action == 'sell':
+    #     ibkr.placeOrder(2, create_contract(ticker), create_order("MKT", "SELL", 100))
+    # return "Order Executed", 200
 
     if ticker and action:
         print(f"Received alert for {action} on {ticker}")

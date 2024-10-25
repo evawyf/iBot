@@ -43,6 +43,13 @@ iBot is a trading bot that uses the Interactive Brokers API to automate trading 
    pip install -e .
    ```
 
+## Debug
+
+```
+lsof -i :$PORT   
+```
+
+
 ## Configuration
 
 1. Ensure that Interactive Brokers Trader Workstation (TWS) or IB Gateway is running.

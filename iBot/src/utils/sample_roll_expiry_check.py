@@ -1,4 +1,3 @@
-
 import calendar
 from datetime import date, datetime, timedelta
 
@@ -49,7 +48,7 @@ if __name__ == "__main__":
     for contract, dates in contracts_2024.items():
         print(f"Contract: {contract}, Roll Date: {dates['roll_date']}, Expiry Date: {dates['expiry_date']}")
     
-    # Example usage of get_lastTradeDateOrContractMonth
+    # Example usage of get_roll_date_lastTradeDateOrContractMonth
     print(f"\nCurrent date: {datetime.now().date()}")
     print(f"lastTradeDateOrContractMonth: {get_roll_date_lastTradeDateOrContractMonth()}")
 

@@ -1,6 +1,6 @@
 
 import random
-from utils.bidict import BiDict
+from bidict import BiDict
 
 class ClientIDAssigner:
     def __init__(self, clients=[]):

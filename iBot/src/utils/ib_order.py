@@ -11,7 +11,7 @@ def create_limit_order(action, totalQuantity, lmtPrice, eTradeOnly=False, firmQu
     # Explicitly set eTradeOnly and firmQuoteOnly
     order.eTradeOnly = eTradeOnly
     order.firmQuoteOnly = firmQuoteOnly
-    print(f"OrderLMT created with action: {order.action}, "
+    print(f"[LMT Order] created with action: {order.action}, "
           f"totalQuantity: {order.totalQuantity}, "
           f"orderType: {order.orderType}, "
           f"lmtPrice: {order.lmtPrice}")
@@ -25,7 +25,7 @@ def create_market_order(action, totalQuantity, eTradeOnly=False, firmQuoteOnly=F
     # Explicitly set eTradeOnly and firmQuoteOnly
     order.eTradeOnly = eTradeOnly
     order.firmQuoteOnly = firmQuoteOnly
-    print(f"OrderMKT created with action: {order.action}, "
+    print(f"[MKT Order]created with action: {order.action}, "
           f"totalQuantity: {order.totalQuantity}, "
           f"orderType: {order.orderType}")
     return order

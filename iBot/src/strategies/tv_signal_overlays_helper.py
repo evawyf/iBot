@@ -16,9 +16,7 @@ def signal_overlay_strategy_quantity_adjustment(
     order_type: str,
     action: str,
     price: float,
-    quantity: float,
-    default_quantity: float,
-    reverse_position_potential: bool = False
+    quantity: float
 ) -> Tuple[Union[object, str], Union[object, str], float]:
     """
     Signal Overlay Strategy for creating contracts and orders based on given parameters.
@@ -32,8 +30,6 @@ def signal_overlay_strategy_quantity_adjustment(
         action (str): Action to take ('BUY' or 'SELL').
         price (float): Price for the order.
         quantity (float): Quantity to trade.
-        default_quantity (float): Default quantity to trade. If no quantity is provided or open-long/open-short, use this default quantity.
-        reverse_position_potential (bool, optional): Whether to potentially reverse the position. Defaults to False.
 
     Returns:
         Tuple[Union[object, str], Union[object, str], float]: A tuple containing the contract object,

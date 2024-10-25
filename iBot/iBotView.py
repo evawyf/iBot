@@ -32,7 +32,6 @@ Example:
 
 IB_PORT = 7497
 WEBHOOK_PORT = 5678
-DEFAULT_QUANTITY = 2
 
 app = Flask(__name__)
 
@@ -141,12 +140,12 @@ class IBotView(EWrapper, EClient):
 
         # Get current position from filled orders
         current_position = self.get_current_position(symbol)
-        print(f"Current position for {symbol}: {current_position}. Default quantity: {DEFAULT_QUANTITY}")
+        print(f"Current position for {symbol}: {current_position}. ")
+        print(f"Signal: {action} {order_type} order quantity {quantity} @ {price}")
 
         contract, order, adjusted_quantity = signal_overlay_strategy_quantity_adjustment(current_position, 
                                                                                          symbol, contract_type, exchange, order_type, 
-                                                                                         action, price, quantity, default_quantity,
-                                                                                         reverse_position_potential)
+                                                                                         action, price, quantity)
 
         # Place order on IBKR
         order_id = self.nextOrderId
@@ -163,13 +162,13 @@ class IBotView(EWrapper, EClient):
         return "Order Executed", 200
         
 # Determine the port based on the argument passed
-if len(sys.argv) > 2 and (sys.argv[2] in ['7496', 'LiveTrading', 'Live', 'LIVE']):
-    port = 7496
-else:
-    port = IB_PORT
+# if len(sys.argv) > 2 and (sys.argv[2] in ['7496', 'LiveTrading', 'Live', 'LIVE']):
+#     port = 7496
+# else:
+#     port = IB_PORT
 
 # Initialize IBKRClient 
-ibkr = IBotView(port=port)
+ibkr = IBotView(port=IB_PORT)
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
@@ -178,6 +177,11 @@ def webhook():
         data_str = request.data.decode('utf-8')
         print("Received data:", json.dumps(json.loads(data_str), indent=2))
         data = json.loads(data_str)
+        
+        # Write the received message to Redis with timestamp
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        ibkr.redis.set(f"webhook:{timestamp}", data_str)
+        
     except json.JSONDecodeError as e:
         print(f"JSON decode error: {e}")
         return "Invalid JSON", 400
@@ -202,16 +206,15 @@ def webhook():
     order_type = data.get('order', None) # MKT, LMT, (TODO: STP, TRAIL, FIXED, PARKED
     action = data.get('action', None) # BUY, SELL
     price = float(data.get('price', 0))
-    quantity = DEFAULT_QUANTITY # int(float(data.get('quantity', "0")))
+    quantity = int(float(data.get('quantity', "0")))
 
     reason = data.get('reason', None) # Open-Long, Open-Short, Close-Long, Close-Short
-    reverse_position_potential = True if reason.lower().startswith('open') else False
 
     try:
         result, status_code = ibkr.strategy_simply_reverse(symbol, 
                                                            contract_type, exchange, action, 
                                                            order_type, price, quantity, 
-                                                           reverse_position_potential)
+                                                           reason)
         return result, status_code
     except ConnectionError as e:
         print(f"Connection error: {e}")

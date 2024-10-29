@@ -5,18 +5,14 @@ from typing import Tuple, Union
 # Add the src directory to the Python path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.ib_contract import create_contract
-from utils.ib_order import create_order
+# from utils.ib_contract import create_contract
+# from utils.ib_order import create_order
 
-def signal_overlay_strategy_quantity_adjustment(
+def reverse_position_quantity_adjustment_helper(
     current_position: float,
-    symbol: str,
-    contract_type: str,
-    exchange: str,
-    order_type: str,
     action: str,
-    price: float,
-    quantity: float
+    quantity: float,
+    reason: str
 ) -> Tuple[Union[object, str], Union[object, str], float]:
     """
     Signal Overlay Strategy for creating contracts and orders based on given parameters.
@@ -44,31 +40,19 @@ def signal_overlay_strategy_quantity_adjustment(
         raise ValueError("action must be either 'BUY' or 'SELL'")
     if not isinstance(quantity, (int, float)) or quantity <= 0:
         raise ValueError("quantity must be a positive number")
-    if not isinstance(reverse_position_potential, bool):
-        raise ValueError("reverse_position_potential must be a boolean")
+    # if not isinstance(reverse_position_potential, bool):
+    #     raise ValueError("reverse_position_potential must be a boolean")
 
-    if reverse_position_potential: 
-        if (current_position >= 0 and action == "SELL") or (current_position <= 0 and action == "BUY"): 
-            # open-long/open-short situation, or first time entering position (current_position == 0)
-            adjusted_quantity = default_quantity + abs(current_position)
-        else:
-            # Not reversing position, same direction position, just simply add quantity
-            adjusted_quantity = quantity 
-    else: 
-        # close-long/close-short situation
-        adjusted_quantity = min(quantity, abs(current_position))
+    reverse_position_potential = reason.lower().startswith('open')
+    opposite_position = (current_position >= 0 and action == "SELL") or (current_position <= 0 and action == "BUY")
 
-    try:
-        contract = create_contract(symbol=symbol, contract_type=contract_type, exchange=exchange)
-    except Exception as e:
-        return f"Contract creation failed: {str(e)}", 400, 0
+    if reverse_position_potential and opposite_position: 
+        adjusted_quantity = quantity - current_position
+    else:
+        # Not reversing position, same direction position, just simply add quantity
+        adjusted_quantity = quantity 
 
-    try:
-        order = create_order(order_type=order_type, action=action, totalQuantity=adjusted_quantity, price=price)
-    except Exception as e:
-        return f"Order creation failed: {str(e)}", 400, 0
-
-    return contract, order, adjusted_quantity
+    return adjusted_quantity, 200
 
 if __name__ == "__main__":
-    print(signal_overlay_strategy_quantity_adjustment(5, "MGC", "FUT", "COMEX", "LMT", "BUY", 150, 3, reverse_position_potential=True))
+    print(reverse_position_quantity_adjustment_helper(5, "MGC", "FUT", "COMEX", "LMT", "BUY", 150, 3, 'open-long'))

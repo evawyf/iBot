@@ -2,83 +2,133 @@ from flask import Flask, request
 import json
 from ibapi.client import EClient
 from ibapi.wrapper import EWrapper
-
+from ibapi.contract import Contract
+from ibapi.utils import iswrapper
 from threading import Thread, Lock
-from src.utils.ib_contract import create_contract
-from src.utils.ib_order import create_order
-from src.strategies.tv_signal_overlays_helper import signal_overlay_strategy_quantity_adjustment
-
+from datetime import datetime
 import sys
 import time
 import random
-from datetime import datetime
 import redis
 import os
+import threading
+
+from src.utils.ib_contract import create_contract
+from src.utils.ib_order import create_order
+from src.strategies.tv_signal_overlays_helper import reverse_position_quantity_adjustment_helper
 
 """
-Main Flask app, receives requests from TradingView and places orders on IBKR
+Main Flask app that receives requests from TradingView and places orders on IBKR
 
-Usage: python iBotView.py <webhook_port> <port> <client_id> 
-Note: <webhook_port> defaults to 5678 if not provided, as this is required for webhook to work, 
-        otherwise it will run on default port 5000 which will not work. 
+Usage: python iBotView.py <webhook_port> <port> <client_id>
 
-Example: 
-    python iBotView.py 5678                     # Paper Trading 7497, default client_id=999  
-    python iBotView.py 5678 7496                # Live Trading, default client_id=999
-    python iBotView.py 5678 7496 888            # Live Trading, custom client_id
-    python iBotView.py 5678 LiveTrading 888     # Live Trading, custom client_id
+Arguments:
+    webhook_port: Port for webhook (defaults to 5678)
+    port: IB Gateway port (defaults to 7497 for paper trading)
+    client_id: Custom client ID (randomly generated if not provided)
 
+Examples:
+    python iBotView.py 5678                  # Paper Trading (port 7497)
+    python iBotView.py 5678 7496             # Live Trading
+    python iBotView.py 5678 7496 888         # Live Trading with custom client ID
 """
 
-IB_PORT = 7497
-WEBHOOK_PORT = 5678
+# Parse command line arguments
+WEBHOOK_PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 5678
+IB_PORT = int(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2].isdigit() else 7497
+DEFAULT_QUANTITY = 1
 
 app = Flask(__name__)
 
 class IBotView(EWrapper, EClient):
     def __init__(self, port=IB_PORT):
         EClient.__init__(self, self)
-        self.positions = {}  # Changed from 0 to an empty dictionary
+        
+        # Core attributes
         self.port = int(port) if port else IB_PORT
         self.client_id = random.randint(8000, 8999)
-        self.nextOrderId = 0
+        self.task_name = "IBotView"
         self.is_connected = False
+        
+        # Order management
+        self.nextOrderId = 0
+        self.openOrders = {}
         self.order_records = {}
+        self.order_id_lock = Lock()
+        
+        # Position tracking
+        self.positions = {}
+        self.openContracts = {}
+        self.contractDetails = {}
+        
+        # Threading and synchronization
         self.lock = Lock()
+        self.position_event = threading.Event()
+        self.connection_event = threading.Event()
         self.last_keepalive = time.time()
+        
+        # Initialize Redis connection
         self.init_db()
 
     def init_db(self):
-        self.redis = redis.Redis(host='localhost', port=6379, db=0)
+        """Initialize Redis database connection"""
+        try:
+            self.redis = redis.Redis(host='localhost', port=6379, db=0)
+            self.redis.ping()
+            
+            # Initialize positions hash if it doesn't exist
+            if not self.redis.exists('positions'):
+                self.redis.hset('positions', 'init', '1')
+                
+        except redis.ConnectionError:
+            print("Error: Could not connect to Redis. Please ensure Redis server is running.")
+            sys.exit(1)
 
     def ib_connect(self, host='127.0.0.1', port=IB_PORT):
-        self.connect(host=host, port=port, clientId=self.client_id)
-        thread = Thread(target=self.run)
-        thread.start()
-        
-        # Wait for connection to be established
-        timeout = 10  # 10 seconds timeout
-        start_time = time.time()
-        while not self.is_connected:
-            if time.time() - start_time > timeout:
-                raise ConnectionError("Timeout: Could not connect to TWS/IB Gateway")
-            time.sleep(0.1)
+        """Establish connection to IB Gateway/TWS"""
+        try:
+            self.connect(host=host, port=port, clientId=self.client_id)
+            
+            # Start message processing thread
+            thread = Thread(target=self.run)
+            thread.start()
+            
+            # Wait for connection with timeout
+            timeout = 10
+            start_time = time.time()
+            while not self.is_connected:
+                if time.time() - start_time > timeout:
+                    raise ConnectionError("Timeout: Could not connect to TWS/IB Gateway")
+                time.sleep(0.1)
+            
+            # Request initial positions
+            self.reqPositions()
+            
+        except Exception as e:
+            print(f"Error connecting to TWS/IB Gateway: {e}")
+            raise
 
+    def ib_disconnect(self):
+        """Disconnect from IB API"""
+        print(f"Disconnecting client task [{self.task_name}] ...")
+        self.disconnect()
+        print("Client disconnected.")
+
+    @iswrapper
     def nextValidId(self, orderId: int):
+        """Callback when connection is established and next valid order ID is received"""
         super().nextValidId(orderId)
-        self.nextOrderId = orderId
+        with self.order_id_lock:
+            self.nextOrderId = orderId
+        print(f"Next valid order ID: {self.nextOrderId}")
+        self.connection_event.set()
         self.is_connected = True
 
-    def connectionClosed(self):
-        super().connectionClosed()
-        self.is_connected = False
-
-    def error(self, reqId, errorCode, errorString):
-        super().error(reqId, errorCode, errorString)
-        print(f"Error {errorCode}: {errorString}")
-
+    @iswrapper
     def orderStatus(self, orderId, status, filled, remaining, avgFillPrice, permId, parentId, lastFillPrice, clientId, whyHeld, mktCapPrice):
-        super().orderStatus(orderId, status, filled, remaining, avgFillPrice, permId, parentId, lastFillPrice, clientId, whyHeld, mktCapPrice)
+        """Callback for order status updates"""
+        print(f"OrderStatus. Id: {orderId}, Status: {status}, Filled: {filled}, Remaining: {remaining}, LastFillPrice: {lastFillPrice}")
+        
         with self.lock:
             order_key = f"order:{orderId}"
             if self.redis.exists(order_key):
@@ -89,7 +139,56 @@ class IBotView(EWrapper, EClient):
                 order_data[b'lastUpdate'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S").encode()
                 self.redis.hset(order_key, mapping=order_data)
 
+    @iswrapper
+    def openOrder(self, orderId, contract, order, orderState):
+        """Callback when order is opened"""
+        print(f"OpenOrder. ID: {orderId}, {contract.symbol}, {contract.secType} @ {contract.exchange}: "
+              f"{order.action}, {order.orderType} Qty: {order.totalQuantity} @ ${order.lmtPrice}")
+        print(f"Order State: {orderState.status}")
+        
+        self.openOrders[orderId] = order
+        self.openContracts[orderId] = contract
+
+    @iswrapper
+    def execDetails(self, reqId, contract, execution):
+        """Callback for execution details"""
+        print(f"ExecDetails. ReqId: {reqId}, Symbol: {contract.symbol}, SecType: {contract.secType}, "
+              f"Currency: {contract.currency}, Execution: {execution.execId}, Time: {execution.time}, "
+              f"Account: {execution.acctNumber}, Exchange: {execution.exchange}, Side: {execution.side}, "
+              f"Shares: {execution.shares}, Price: {execution.price}")
+
+    def connectionClosed(self):
+        """Callback when connection is closed"""
+        super().connectionClosed()
+        self.is_connected = False
+
+    def error(self, reqId, errorCode, errorString):
+        """Callback for error messages"""
+        super().error(reqId, errorCode, errorString)
+        print(f"Error {errorCode}: {errorString}")
+
+    def contractDetails(self, reqId: int, contractDetails):
+        """Store contract details when received"""
+        super().contractDetails(reqId, contractDetails)
+        self.contractDetails[reqId] = contractDetails
+
+    def contractDetailsEnd(self, reqId: int):
+        """Called when all contract details have been received"""
+        super().contractDetailsEnd(reqId)
+        print(f"Contract details request completed for reqId: {reqId}")
+
+    @iswrapper
+    def position(self, account: str, contract: Contract, position: float, avgCost: float):
+        """Handle position updates"""
+        if hasattr(self, 'positions'):
+            symbol = contract.symbol
+            self.positions[symbol] = position
+            print(f"Position update received for {symbol}: {position}")
+            return position
+        return None
+
     def record_order(self, order_id, symbol, contract_type, action, order_type, quantity, price):
+        """Record order details in Redis"""
         with self.lock:
             order_data = {
                 'symbol': symbol,
@@ -106,146 +205,128 @@ class IBotView(EWrapper, EClient):
             }
             self.redis.hset(f"order:{order_id}", mapping=order_data)
 
-    def keep_alive(self):
-        current_time = time.time()
-        if current_time - self.last_keepalive > 30:  # Send keepalive every 30 seconds
-            self.reqCurrentTime()
-            self.last_keepalive = current_time
-
-    def currentTime(self, time:int):
-        super().currentTime(time)
-        print(f"Current time from server: {time}")
-
-    def get_current_position(self, symbol):
-        if symbol not in self.positions:
-            self.positions[symbol] = 0
-        orders = self.redis.keys("order:*")
-        for order_key in orders:
-            order_data = self.redis.hgetall(order_key)
-            if order_data[b'symbol'].decode() == symbol and float(order_data[b'filled']) > 0:
-                if order_data[b'action'].decode() == 'BUY':
-                    self.positions[symbol] += int(float(order_data[b'filled']))
-                else:
-                    self.positions[symbol] -= int(float(order_data[b'filled']))
-        return self.positions[symbol]
-
-    # For any confirmation, just open position (or reverse position)
-    def strategy_simply_reverse(self, symbol, contract_type, exchange, 
-                                action, order_type, price, quantity, default_quantity,
-                                reverse_position_potential):
-        if not self.is_connected:
-            self.ib_connect()  # Attempt to reconnect if not connected
-
-        self.keep_alive()
-
-        # Get current position from filled orders
-        current_position = self.get_current_position(symbol)
-        print(f"Current position for {symbol}: {current_position}. ")
-        print(f"Signal: {action} {order_type} order quantity {quantity} @ {price}")
-
-        contract, order, adjusted_quantity = signal_overlay_strategy_quantity_adjustment(current_position, 
-                                                                                         symbol, contract_type, exchange, order_type, 
-                                                                                         action, price, quantity)
-
-        # Place order on IBKR
-        order_id = self.nextOrderId
-        self.nextOrderId += 1
-        try:
-            self.placeOrder(order_id, contract, order)
-            self.record_order(order_id, symbol, contract_type, action, order_type, adjusted_quantity, price)
-        except Exception as e:
-            print(f"Error placing order: {e}")
-            return "Order placement failed", 400
-        
-        # Update the position for the symbol based on filled orders
-        self.positions[symbol] = self.get_current_position(symbol)
-        return "Order Executed", 200
-        
-# Determine the port based on the argument passed
-# if len(sys.argv) > 2 and (sys.argv[2] in ['7496', 'LiveTrading', 'Live', 'LIVE']):
-#     port = 7496
-# else:
-#     port = IB_PORT
-
-# Initialize IBKRClient 
+# Initialize IBKRClient
 ibkr = IBotView(port=IB_PORT)
 
 @app.route('/webhook', methods=['POST'])
 def webhook():
+    """Handle incoming webhook requests from TradingView"""
     try:
-        # Decode the bytes to a string before using json.dumps
+        # Parse incoming JSON data
         data_str = request.data.decode('utf-8')
         print("Received data:", json.dumps(json.loads(data_str), indent=2))
         data = json.loads(data_str)
-        
-        # Write the received message to Redis with timestamp
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        ibkr.redis.set(f"webhook:{timestamp}", data_str)
         
     except json.JSONDecodeError as e:
         print(f"JSON decode error: {e}")
         return "Invalid JSON", 400
 
-    """
-    The data format should be like this:
-    {
-        "ticker": "{{ticker}}",
-        "action": "BUY",
-        "contract": "FUT",
-        "order": "MKT",
-        "price": "{{close}}", 
-        "reason": "Open-Long",
-        "quantity": "1"
-    }
-    """
+    # Validate required fields
+    required_fields = ['ticker', 'action', 'contract', 'order', 'price', 'reason']
+    for field in required_fields:
+        if field not in data:
+            return f"Missing required field: {field}", 400
 
-    symbol = data.get('ticker', None) # MES, MGC, AAPL
-    contract_type = data.get('contract', None) # STK, FUT 
-    exchange = data.get('exchange', None) # SMART, CME, NYSE, etc
+    # Extract order parameters
+    symbol = data.get('ticker')  # MES1!, MGC1!, AAPL
+    contract_type = data.get('contract')  # STK, FUT
+    exchange = data.get('exchange', 'SMART')  # SMART, CME, NYSE, etc
+    
+    # Handle futures contract symbols
+    if contract_type == "FUT":
+        symbol = symbol[:-2] if symbol[-1] == '!' and symbol[-2].isdigit() else symbol
 
-    order_type = data.get('order', None) # MKT, LMT, (TODO: STP, TRAIL, FIXED, PARKED
-    action = data.get('action', None) # BUY, SELL
-    price = float(data.get('price', 0))
-    quantity = int(float(data.get('quantity', "0")))
+    order_type = data.get('order')  # MKT, LMT
+    action = data.get('action').upper()  # BUY, SELL
+    reason = data.get('reason').lower()  # Open-Long, Open-Short, Close-Long, Close-Short
+    
+    try:
+        price = float(data.get('price', 0))
+        quantity = int(data.get('quantity', DEFAULT_QUANTITY))
+    except ValueError as e:
+        return f"Invalid price or quantity format: {str(e)}", 400
 
-    reason = data.get('reason', None) # Open-Long, Open-Short, Close-Long, Close-Short
+    # Adjust quantity based on current position 
+    adjusted_quantity = reverse_position_quantity_adjustment_helper(ibkr.positions.get(symbol, 0), 
+                                                                    symbol, action, quantity, reason)
+
+    # Create contract and order objects
+    contract = create_contract(symbol=symbol, contract_type=contract_type, exchange=exchange)
+    order = create_order(order_type=order_type, action=action, totalQuantity=adjusted_quantity, price=price)
 
     try:
-        result, status_code = ibkr.strategy_simply_reverse(symbol, 
-                                                           contract_type, exchange, action, 
-                                                           order_type, price, quantity, 
-                                                           reason)
-        return result, status_code
+        # Place order on IBKR
+        order_id = ibkr.nextOrderId
+        ibkr.nextOrderId += 1
+        
+        try:
+            ibkr.placeOrder(order_id, contract, order)
+            ibkr.record_order(order_id, symbol, contract_type, action, order_type, adjusted_quantity, price)
+        except Exception as e:
+            print(f"Error placing order: {e}")
+            return "Order placement failed", 400
+        
+        return "Order Executed", 200
+        
     except ConnectionError as e:
         print(f"Connection error: {e}")
         return "Not connected to TWS/IB Gateway", 503
     except Exception as e:
         print(f"Error executing strategy: {e}")
         return "Strategy execution failed", 400
+    
 
 def start_ibkr():
+    """Initialize and start IB connection with retry logic"""
     global ibkr
     max_retries = 3
     retry_count = 0
+    
     while retry_count < max_retries:
         try:
-            ibkr.ib_connect()  # Connect to TWS paper trading on a separate thread
-            return  # If connection successful, exit the function
+            ibkr.ib_connect()
+            return
         except ConnectionError as e:
             print(f"Failed to connect to TWS/IB Gateway: {e}")
             retry_count += 1
+            
             if retry_count < max_retries:
                 new_client_id = random.randint(8000, 8999)
                 print(f"Attempting to reconnect with new client ID: {new_client_id}")
-                ibkr = IBotView(port=ibkr.port)
+                ibkr = IBotView(port=IB_PORT)
                 ibkr.client_id = new_client_id
             else:
                 print("Max retries reached. Exiting.")
                 sys.exit(1)
 
+
+def reverse_position_quantity_adjustment_helper(current_position, symbol, action, quantity, reason):
+    # Calculate adjusted quantity based on current position
+    print(f"[Current position] [{symbol}]: {current_position}")
+
+    reverse_position = reason.lower().startswith('open')
+    print(f"[Reverse position] : {reverse_position}")
+    if reverse_position == False:
+        return quantity
+    
+    opposite_position = (current_position > 0 and action == "SELL") or (current_position < 0 and action == "BUY")
+    print(f"[Opposite position] : {opposite_position}")
+    if opposite_position:
+        adjusted_quantity = abs(quantity) + abs(current_position)
+        print(f"[Adjusted quantity] : {adjusted_quantity}")
+    else:
+        adjusted_quantity = quantity
+        print(f"Same direction, no adjustment: {adjusted_quantity}")
+
+    return adjusted_quantity
+
+
 def start_flask():
+    """Start Flask web server"""
     print("Please ensure ngrok is running and connected to this port: 5678")
-    app.run(debug=True, port=5678)
+    app.run(debug=True, port=WEBHOOK_PORT)
+
+
 
 if __name__ == '__main__':
     # Start IBotView in a separate thread
@@ -263,5 +344,3 @@ if __name__ == '__main__':
 
     # Start Flask app in the main thread
     start_flask()
-
-

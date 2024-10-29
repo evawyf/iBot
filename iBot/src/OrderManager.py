@@ -3,56 +3,58 @@ from ibapi.wrapper import EWrapper
 from ibapi.utils import iswrapper
 
 from utils.ib_contract import create_contract
+from ibapi.contract import Contract
 from utils.ib_order import create_limit_order, create_market_order
 
-import time, threading
+import time
+import threading
 from datetime import datetime
 import random
 
-# Help to get OrderID as a 9 digit integer: 102214010
 def formatted_time_as_int():
+    """Help to get OrderID as a 9 digit integer: 102214010"""
     now = datetime.now()
     return int(now.strftime("%m%d%H%M%S"))
 
-"""
-IB API wrapper
-"""
 class IBOrderManager(EWrapper, EClient):
-    def __init__(self, port, max_wait_time=30, task_name="OrderManager"):
+    """IB API wrapper for managing orders"""
+    
+    def __init__(self, port, max_wait_time=30):
         EClient.__init__(self, self)
         self.nextOrderId = None
         self.port = port
-        self.client_id = random.randint(1000, 1999)
+        self.client_id = random.randint(2000, 2999)
         self.max_wait_time = max_wait_time
         self.connection_event = threading.Event()
         self.order_id_lock = threading.Lock()
-        self.task_name = task_name
         self.openOrders = {}
         self.openContracts = {}
+        self.task_name = "OrderManager"
+        self.positions = {}
+        self.position_event = threading.Event()
 
-    def ib_connect(self):
         # Try to connect
         try:
             self.connect('127.0.0.1', self.port, self.client_id)
         except Exception as e:
             print(f"Error connecting: {e}")
-            return False
+            return None
 
         # Start the socket in a thread
         api_thread = threading.Thread(target=self.run, daemon=True)
         api_thread.start()
 
         # Wait for nextValidId with a timeout
-        if not self.connection_event.wait(timeout=self.max_wait_time):
-            print("Timeout waiting for nextValidId. Please check your connection.")
-            self.disconnect()
-            return False
+        # if not self.connection_event.wait(timeout=self.max_wait_time):
+        #     print("Timeout waiting for nextValidId. Please check your connection.")
+        #     self.disconnect()
+        #     return None
 
         print(f"Received nextValidId: {self.nextOrderId}")
         print("Connection established.")
-        return True
 
     def ib_disconnect(self):
+        """Disconnect from IB API"""
         print(f"Disconnecting client task [{self.task_name}] ...")
         self.disconnect()
         print(f"Client disconnected.")
@@ -71,64 +73,46 @@ class IBOrderManager(EWrapper, EClient):
 
     @iswrapper
     def openOrder(self, orderId, contract, order, orderState):
-        # The openOrder function may be called multiple times for the same order
-        # This can happen when the order status changes or when TWS is providing updates
-        # It's normal behavior and not necessarily an error
         print(f"OpenOrder. ID: {orderId}, {contract.symbol}, {contract.secType} @ {contract.exchange}: {order.action}, {order.orderType} Qty: {order.totalQuantity} @ ${order.lmtPrice}")
-        print(f"Order State: {orderState.status}")  # Print the order state to see why it might be called multiple times
+        print(f"Order State: {orderState.status}")
         
-        # We store open orders and their corresponding contracts in separate dictionaries
-        # This allows us to:
-        # 1. Keep track of all open orders
-        # 2. Easily access order details and contract information for each open order
-        # 3. Efficiently cancel orders or modify them if needed
-        # 4. Provide a quick way to check if an order is still open
         self.openOrders[orderId] = order
         self.openContracts[orderId] = contract
 
     @iswrapper
     def execDetails(self, reqId, contract, execution):
-        print(f"ExecDetails. ReqId: {reqId}, Symbol: {contract.symbol}, SecType: {contract.secType}, Currency: {contract.currency}, Execution: {execution.execId}, Time: {execution.time}, Account: {execution.acctNumber}, Exchange: {execution.exchange}, Side: {execution.side}, Shares: {execution.shares}, Price: {execution.price}")
+        print(f"ExecDetails. ReqId: {reqId}, Symbol: {contract.symbol}, SecType: {contract.secType}, Currency: {contract.currency}, "
+              f"Execution: {execution.execId}, Time: {execution.time}, Account: {execution.acctNumber}, Exchange: {execution.exchange}, "
+              f"Side: {execution.side}, Shares: {execution.shares}, Price: {execution.price}")
 
     def verify_contract(self, contract):
-        """
-        Verify if the contract is valid using the TWS API.
-        
-        :param contract: The Contract object to verify
-        :return: True if the contract is valid, False otherwise
-        """
+        """Verify if the contract is valid using the TWS API."""
         contract_details = []
         
         def contract_details_handler(req_id, details):
             nonlocal contract_details
             contract_details.append(details)
         
-        # Set up the event handler
         self.contractDetails = contract_details_handler
-        
-        # Request contract details
         req_id = self.reqContractDetails(contract)
         
-        # Wait for the response (with a timeout mechanism)
         timeout = 5  # seconds
         start_time = time.time()
         while not contract_details and time.time() - start_time < timeout:
             self.run()
             time.sleep(0.1)
         
-        # Clean up the event handler
         self.contractDetails = None
         
-        # Check if we received any contract details
         if contract_details:
             print(f"Contract verified: {contract.symbol}")
             return True
-        else:
-            print(f"Invalid contract: {contract.symbol}")
-            return False
         
+        print(f"Invalid contract: {contract.symbol}")
+        return False
 
     def place_limit_order(self, symbol, contract_type, action, quantity, price):
+        """Place a limit order"""
         with self.order_id_lock:
             if self.nextOrderId is None:
                 print("Error: NextOrderId not received. Ensure connection is established.")
@@ -136,13 +120,12 @@ class IBOrderManager(EWrapper, EClient):
             current_order_id = self.nextOrderId
             self.nextOrderId += 1
 
-        # Create the contract based on the type
         contract = create_contract(symbol, contract_type)
-        # Create the order and place it
         order = create_limit_order(action, quantity, price)
         self.placeOrder(current_order_id, contract, order)
 
     def place_market_order(self, symbol, contract_type, action, quantity):
+        """Place a market order"""
         with self.order_id_lock:
             if self.nextOrderId is None:
                 print("Error: NextOrderId not received. Ensure connection is established.")
@@ -150,14 +133,12 @@ class IBOrderManager(EWrapper, EClient):
             current_order_id = self.nextOrderId
             self.nextOrderId += 1
 
-        # Create the contract based on the type
         contract = create_contract(symbol, contract_type)
-        # Create the order and place it
         order = create_market_order(action, quantity)
         self.placeOrder(current_order_id, contract, order)
 
     def cancel_order_by_details(self, symbol, action, price):
-        # Iterate through open orders to find a match
+        """Cancel an order by matching its details"""
         for orderId, order in self.openOrders.items():
             contract = self.openContracts[orderId]
             
@@ -173,6 +154,7 @@ class IBOrderManager(EWrapper, EClient):
         return False
     
     def cancel_all_orders(self):
+        """Cancel all open orders"""
         if self.openOrders:
             for orderId in list(self.openOrders.keys()):
                 print(f"Cancelling order: ID {orderId}")
@@ -181,51 +163,58 @@ class IBOrderManager(EWrapper, EClient):
         else:
             print("No open orders to cancel.")
 
+    @iswrapper
+    def position(self, account: str, contract: Contract, position: float, avgCost: float):
+        """Handle position updates"""
+        if hasattr(self, 'positions'):
+            symbol = contract.symbol
+            self.positions[symbol] = position
+            print(f"Position update received for {symbol}: {position}")
+            return position
+        return None
 
+    # def request_positions(self):
+    #     """Request positions from IB"""
+    #     self.position_event.clear()
+    #     self.reqPositions()
+    #     if not self.position_event.wait(timeout=self.max_wait_time):
+    #         print("Timeout waiting for positions")
+    #     return self.positions
 
-
-# Usage example:
-if __name__ == "__main__":
-
-    PORT = 7497
+def main():
+    """Main entry point for testing"""
+    app = IBOrderManager(port=7497)
     PRICE = 200
 
-    app = IBOrderManager(PORT)
-    if app.ib_connect():
-        try:
-            # Your IB tasks go here
-            # For example:
-            app.place_limit_order("MES", "FUT", "BUY", 1, PRICE)
-            
-            # Wait for 5 seconds (or adjust as needed)
+    try:
+        # positions = app.request_positions()
+        print(f">>>>>> Positions ALL: {app.positions}")
+        
+        app.place_limit_order("MES", "FUT", "BUY", 1, PRICE)
+        time.sleep(5)
+
+        for i in range(1, 6):            
+            app.place_limit_order("MES", "FUT", "BUY", 1, 100)
+            position = app.positions.get("MES", 0)
+            print(f">>>>> Position MES: {position}")
             time.sleep(5)
 
-            for i in range(1, 6):
-                app.place_limit_order("MES", "FUT", "BUY", 1, PRICE + i)
-                time.sleep(1)
-            
-            # Cancel the order
-            app.cancel_order_by_details("MES", "BUY", PRICE)
+        print("Test MGC now")
+        app.place_limit_order("MGC", "FUT", "BUY", 1, 100)  
+        time.sleep(1)
+        app.place_market_order("MGC", "FUT", "BUY", 1)
+        position = app.positions.get("MGC", 0)
+        print(f">>>>> Position MGC: {position}")
+        time.sleep(1)
+        app.place_limit_order("AAPL", "STK", "SELL", 1, 100)
+        time.sleep(5)
+        app.place_market_order("MGC", "FUT", "SELL", 1)
+        time.sleep(1)
+        
+        app.cancel_all_orders()
 
-            app.place_limit_order("AAPL", "STK", "BUY", 1, 100)
+    finally:
+        app.ib_disconnect()
 
-            time.sleep(5)
-
-
-            print("Test MGC now")
-            app.place_limit_order("MGC", "FUT", "BUY", 1, 100)  
-            time.sleep(1)
-            app.place_market_order("MGC", "FUT", "BUY", 1)
-            time.sleep(1)
-            app.place_limit_order("AAPL", "STK", "SELL", 1, 100)
-            time.sleep(5)
-            app.place_market_order("MGC", "FUT", "SELL", 1)
-            time.sleep(1)
-            
-            app.cancel_all_orders()
-
-        finally:
-            # Disconnect
-            app.ib_disconnect()
-    else:
-        print("Failed to connect to TWS.")
+if __name__ == "__main__":
+    main()

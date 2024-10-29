@@ -230,7 +230,7 @@ def webhook():
     # Extract order parameters
     symbol = data.get('ticker')  # MES1!, MGC1!, AAPL
     contract_type = data.get('contract')  # STK, FUT
-    exchange = data.get('exchange', 'SMART')  # SMART, CME, NYSE, etc
+    exchange = data.get('exchange', None)  # SMART, CME, NYSE, etc
     
     # Handle futures contract symbols
     if contract_type == "FUT":

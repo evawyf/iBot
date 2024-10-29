@@ -28,6 +28,8 @@ def get_default_exchange(symbol):
         "ES": "CME",
         "MES": "CME",
         "NQ": "CME",
+        "MNQ": "CME",
+        "MBT": "CME",
         "CL": "NYMEX",
         "GC": "COMEX",
         "MGC": "COMEX",

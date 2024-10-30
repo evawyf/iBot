@@ -251,8 +251,8 @@ def webhook():
                                                                     symbol, action, quantity, reason)
 
     # Create contract and order objects
-    contract = create_contract(symbol=symbol, contract_type=contract_type, exchange=exchange)
-    order = create_order(order_type=order_type, action=action, totalQuantity=adjusted_quantity, price=price)
+    contract = create_contract(symbol, contract_type, exchange)
+    order = create_order(symbol, order_type, action, adjusted_quantity, price)
 
     try:
         # Place order on IBKR

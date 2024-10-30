@@ -1,4 +1,12 @@
 from ibapi.order import Order
+
+tick_size = {
+    "MES": 0.25,
+    "MGC": 0.10,
+    "MNQ": 0.25,
+    "MBT": 1  # 5 index point
+}
+
 """
 Initializes order types
 """
@@ -30,10 +38,22 @@ def create_market_order(action, totalQuantity, eTradeOnly=False, firmQuoteOnly=F
           f"orderType: {order.orderType}")
     return order
 
-def create_order(order_type, action, totalQuantity, price=0):
+def create_order(symbol, order_type, action, totalQuantity, price=0):
     if order_type == "MKT":
         return create_market_order(action, totalQuantity)
     elif order_type == "LMT":
+        tick = 1
+        if symbol.startswith("MES"):
+            tick = tick_size["MES"]
+        elif symbol.startswith("MNQ"):
+            tick = tick_size["MNQ"]
+        elif symbol.startswith("MBT"):
+            tick = tick_size["MBT"]
+        elif symbol.startswith("MGC"):
+            tick = tick_size["MGC"]
+        else:
+            print("New symbol and tick size not supported.")
+        price = round(price / tick) * tick
         return create_limit_order(action, totalQuantity, price)
     else:
         raise ValueError(f"Invalid order type: {order_type}")

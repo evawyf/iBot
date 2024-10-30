@@ -39,6 +39,13 @@ def create_market_order(action, totalQuantity, eTradeOnly=False, firmQuoteOnly=F
     return order
 
 def create_order(symbol, order_type, action, totalQuantity, price=0):
+    if action.upper() == "BUY":
+        signal = 1
+    elif action.upper() == "SELL":
+        signal = -1
+    else:
+        raise Exception(f"Invalid order type {action}, should be BUY or SELL")
+
     if order_type == "MKT":
         return create_market_order(action, totalQuantity)
     elif order_type == "LMT":
@@ -53,7 +60,7 @@ def create_order(symbol, order_type, action, totalQuantity, price=0):
             tick = tick_size["MGC"]
         else:
             print("New symbol and tick size not supported.")
-        price = round(price / tick) * tick
+        price = round(price / tick + signal) * tick
         return create_limit_order(action, totalQuantity, price)
     else:
         raise ValueError(f"Invalid order type: {order_type}")

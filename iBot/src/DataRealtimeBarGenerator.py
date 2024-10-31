@@ -5,7 +5,7 @@ from ibapi.contract import ContractDetails
 
 import threading, time, sqlite3, queue
 from datetime import datetime, timedelta
-from utils.ib_contract import create_contract
+from iBot.src.utils.sample_ib_contract import create_contract
 import pytz
 from utils.sqlite_helper import SQLiteHelper
 import sys

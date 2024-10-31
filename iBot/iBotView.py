@@ -12,8 +12,8 @@ import threading
 
 from src.iBotViewApp import IBotView
 from src.OrderManager import OrderManager
-from src.utils.ib_contract import create_contract
-from src.utils.ib_order import create_order
+from iBot.src.utils.sample_ib_contract import create_contract
+from iBot.src.utils.sample_ib_order import create_order
 from src.strategies.tv_signal_overlays_helper import reverse_position_quantity_adjustment_helper
 
 """
@@ -86,8 +86,7 @@ def webhook():
                                                                     symbol, action, quantity, reason)
 
     # Create contract and order objects
-    contract = orderManager.create_contract(symbol, contract_type, exchange)
-    order = orderManager.create_order(symbol, order_type, action, adjusted_quantity, price)
+    order_id = orderManager.place_order(symbol, order_type, action, adjusted_quantity, price)
 
     try:
         # Place order on IBKR

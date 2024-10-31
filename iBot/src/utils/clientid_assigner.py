@@ -1,6 +1,6 @@
 
 import random
-from bidict import BiDict
+from iBot.src.utils.sample_bidict import BiDict
 
 class ClientIDAssigner:
     def __init__(self, clients=[]):

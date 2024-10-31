@@ -2,7 +2,6 @@ from ibapi.client import EClient
 from ibapi.wrapper import EWrapper
 from ibapi.utils import iswrapper
 
-from utils.ib_contract import create_contract
 from ibapi.contract import Contract
 from ibapi.order import Order
 
@@ -10,11 +9,6 @@ import time
 import threading
 from datetime import datetime
 import random
-
-def formatted_time_as_int():
-    """Help to get OrderID as a 9 digit integer: 102214010"""
-    now = datetime.now()
-    return int(now.strftime("%m%d%H%M%S"))
 
 
 class OrderManager(EWrapper, EClient):
@@ -118,6 +112,17 @@ class OrderManager(EWrapper, EClient):
             raise ValueError(f"No contract details received for {symbol}")
             
         return self.contract_details[0]  # Return the front month contract
+
+    """
+    Place an order for either futures or stocks
+    """
+    def place_order(self, symbol, sec_type, order_type, action, quantity, price=None):
+        if sec_type == "FUT":
+            return self.place_futures_order(symbol, order_type, action, quantity, price)
+        elif sec_type == "STK":
+            return self.place_stock_order(symbol, order_type, action, quantity, price)
+        else:
+            raise ValueError(f"Invalid order type: {sec_type}")
 
     def place_futures_order(self, symbol, order_type, action, quantity, price=None):
         """
@@ -343,6 +348,7 @@ class OrderManager(EWrapper, EClient):
         print(f"No matching order found for {symbol} {action} @ {price}")
         return False
     
+    # TODO: Seems it can only cancel for current function order, not any order which still live in TWS
     def cancel_all_orders(self):
         """Cancel all open orders"""
         if self.openOrders:
@@ -381,17 +387,20 @@ def main():
         app = OrderManager(port=7497)
         
         # Test different order types
-        test_fut_orders = [
-            ("MES1!", "LMT", "BUY", 1, 800.00567),
-            ("MES2!", "LMT", "BUY", 1, 700.0056756),
-            ("MGC1!", "LMT", "BUY", 1, 700.0045645),
-            ("MNQ1!", "LMT", "BUY", 1, 700.0023423),
-            ("MBT1!", "LMT", "BUY", 1, 700.0045645)
+        test_orders = [
+            ("MES1!", "FUT", "LMT", "BUY", 1, 800.00567),
+            ("MES2!", "FUT", "LMT", "BUY", 1, 700.0056756),
+            ("MGC1!", "FUT", "LMT", "BUY", 1, 700.0045645),
+            ("MNQ1!", "FUT", "LMT", "BUY", 1, 700.0023423),
+            ("MBT1!", "FUT", "LMT", "BUY", 1, 700.0045645),
+            ("AAPL", "STK", "LMT", "BUY", 1, 150.00), 
+            ("GOOGL", "STK", "LMT", "BUY", 1, 153.00),
+            ("AMZN", "STK", "LMT", "BUY", 1, 155.00)
         ]
         
-        for symbol, order_type, action, qty, price in test_fut_orders:
-            order_id = app.place_futures_order(symbol, order_type, action, qty, price)
-            print(f"Placed FUT order {order_id}")
+        for symbol, sec_type, order_type, action, qty, price in test_orders:
+            order_id = app.place_order(symbol, sec_type, order_type, action, qty, price)
+            print(f"Placed {sec_type} {order_type} order {order_id}: {symbol} {action} {qty} @ {price}")
             time.sleep(1)
             
             # Test cancelling individual order
@@ -400,16 +409,7 @@ def main():
                 print(f"Cancelled order {order_id}")
                 time.sleep(1)
 
-        test_stk_orders = [
-            ("AAPL", "LMT", "BUY", 1, 150.00), 
-            ("GOOGL", "LMT", "BUY", 1, 153.00),
-            ("AMZN", "LMT", "BUY", 1, 155.00)
-        ]
         
-        for symbol, order_type, action, qty, price in test_stk_orders:
-            order_id = app.place_stock_order(symbol, order_type, action, qty, price)
-            print(f"Placed STK order {order_id}")
-            time.sleep(1)
 
         time.sleep(5)  # Wait to see the order status
         app.cancel_all_orders()

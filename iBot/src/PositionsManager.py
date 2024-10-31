@@ -1,7 +1,7 @@
 from ibapi.client import EClient
 from ibapi.wrapper import EWrapper
 from ibapi.contract import Contract
-from utils.ib_contract import create_contract
+from iBot.src.utils.sample_ib_contract import create_contract
 from ibapi.common import *
 from datetime import datetime
 import threading

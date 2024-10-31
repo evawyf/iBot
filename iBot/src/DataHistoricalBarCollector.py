@@ -6,7 +6,7 @@ import pandas as pd
 import pytz
 import threading
 import time
-from utils.ib_contract import create_contract
+from iBot.src.utils.sample_ib_contract import create_contract
 from utils.barsize_valid_check import barsize_valid_check
 from utils.sqlite_helper import SQLiteHelper
 from utils.data_cleaner import clean_data

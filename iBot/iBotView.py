@@ -12,8 +12,6 @@ import threading
 
 from src.iBotViewApp import IBotView
 from src.OrderManager import OrderManager
-from iBot.src.utils.sample_ib_contract import create_contract
-from iBot.src.utils.sample_ib_order import create_order
 from src.strategies.tv_signal_overlays_helper import reverse_position_quantity_adjustment_helper
 
 """
@@ -85,30 +83,16 @@ def webhook():
     adjusted_quantity = reverse_position_quantity_adjustment_helper(ibkr.positions.get(symbol, 0), 
                                                                     symbol, action, quantity, reason)
 
-    # Create contract and order objects
-    order_id = orderManager.place_order(symbol, order_type, action, adjusted_quantity, price)
-
     try:
-        # Place order on IBKR
-        order_id = orderManager.nextOrderId
-        orderManager.nextOrderId += 1
-        
-        try:
-            orderManager.placeOrder(order_id, contract, order)
-            orderManager.record_order(order_id, symbol, contract_type, action, order_type, adjusted_quantity, price)
-        except Exception as e:
-            print(f"Error placing order: {e}")
-            return "Order placement failed", 400
-        
-        return "Order Executed", 200
-        
-    except ConnectionError as e:
-        print(f"Connection error: {e}")
-        return "Not connected to TWS/IB Gateway", 503
+        # Place order on IBKR        
+        order_id = orderManager.place_order(symbol, contract_type, order_type, action, adjusted_quantity, price)
+        ibkr.record_order(order_id, symbol, contract_type, action, order_type, adjusted_quantity, price)
+                
     except Exception as e:
         print(f"Error executing strategy: {e}")
         return "Strategy execution failed", 400
     
+    return "Order placed successfully", 200  # Add return statement for successful case
 
 def start_ibkr():
     """Initialize and start IB connection with retry logic"""
@@ -159,7 +143,6 @@ def start_flask():
     """Start Flask web server"""
     print("Please ensure ngrok is running and connected to this port: 5678")
     app.run(debug=True, port=WEBHOOK_PORT)
-
 
 
 if __name__ == '__main__':

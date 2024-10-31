@@ -26,7 +26,7 @@ class OrderManager(EWrapper, EClient):
         self.task_name = "OrderManager"
         self.positions = {}
         self.position_event = threading.Event()
-        self.tick_given = 2
+        self.tick_given = 1
 
         # Contract mapping
         self.contract_map = {

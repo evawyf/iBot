@@ -26,8 +26,47 @@ class OrderManager(EWrapper, EClient):
         self.task_name = "OrderManager"
         self.positions = {}
         self.position_event = threading.Event()
-        self.contract_details = []
-        self.contract_ready = False
+
+        # Contract mapping
+        self.contract_map = {
+            "MES": "MESZ4",  # Micro E-mini S&P 500 June 2024
+            "MGC": "MGCZ4",  # Micro Gold June 2024
+            "MNQ": "MNQZ4",  # Micro E-mini Nasdaq-100 June 2024
+            "MBT": "MBTX4",  # Micro Bitcoin June 2024
+            "M2K": "M2KZ4",   # Micro Russell 2000 June 2024
+            "MYM": "MYMZ4"   # Micro E-mini Dow June 2024 (fixed comment)
+        }
+
+        self.exchange_map = {
+            # Micro Futures
+            "MES": "CME",
+            "MGC": "COMEX",
+            "MNQ": "CME", 
+            "MBT": "CME",
+            "M2K": "CME",    # Added missing M2K
+            "MYM": "CME",    # Added missing MYM
+
+            # Stocks
+            "AAPL": "NYSE",
+            "JPM": "NYSE",
+            "JNJ": "NYSE", 
+            "V": "NYSE",
+            "PG": "NYSE",
+            "MSFT": "NASDAQ",
+            "GOOGL": "NASDAQ",
+            "AMZN": "NASDAQ",
+            "FB": "NASDAQ",
+            "TSLA": "NASDAQ"
+        }
+
+        self.tick_size = {
+            "MES": 0.25,
+            "MGC": 0.10,
+            "MNQ": 0.25,
+            "MBT": 5.00,
+            "M2K": 0.10,   # Added missing M2K
+            "MYM": 1.00    # Added missing MYM
+        }
 
         # Try to connect
         try:
@@ -64,55 +103,6 @@ class OrderManager(EWrapper, EClient):
         print(f"The next valid order id is: {self.nextOrderId}")
         self.connection_event.set()
 
-    def contractDetails(self, reqId, contractDetails):
-        print(f"ContractDetails. ReqId: {reqId}, Contract: {contractDetails.contract.localSymbol}")
-        self.contract_details.append(contractDetails)
-
-    def contractDetailsEnd(self, reqId):
-        print(f"ContractDetailsEnd. ReqId: {reqId}")
-        if self.contract_details:
-            self.contract_details.sort(key=lambda x: datetime.strptime(x.contractMonth, '%Y%m'))
-            front_contract = self.contract_details[0].contract
-            print(f"Using front month contract: {front_contract.localSymbol}")
-            self.contract_ready = True
-            self.contract_details = [front_contract]  # Store only the front month contract
-
-    def get_front_month_contract(self, symbol):
-        """
-        Get the front month futures contract for the given symbol.
-        Returns the contract with localSymbol.
-        """
-        if not symbol:
-            raise ValueError("Symbol is required")
-            
-        # Reset contract details
-        self.contract_details = []
-        self.contract_ready = False
-        
-        # Create a generic contract for the symbol
-        contract = Contract()
-        contract.symbol = symbol
-        contract.secType = "FUT"
-        contract.exchange = self.get_exchange(symbol)
-        contract.currency = "USD"
-        
-        # Request contract details
-        print(f"Requesting contract details for {symbol}...")
-        self.reqContractDetails(random.randint(100000, 999999), contract)
-        
-        # Wait for contract details
-        timeout = time.time() + self.max_wait_time
-        while not self.contract_ready and time.time() < timeout:
-            time.sleep(0.1)
-            
-        if not self.contract_ready:
-            raise TimeoutError("Failed to receive contract details within timeout period")
-        
-        if not self.contract_details:
-            raise ValueError(f"No contract details received for {symbol}")
-            
-        return self.contract_details[0]  # Return the front month contract
-
     """
     Place an order for either futures or stocks
     """
@@ -139,9 +129,18 @@ class OrderManager(EWrapper, EClient):
             
         # For futures contract, "MES1!" -> "MES" 
         symbol = symbol[:-2] if symbol[-1] == '!' and symbol[-2].isdigit() else symbol
+        
         try:
-            # Get the front month contract
-            contract = self.get_front_month_contract(symbol)
+            # Create futures contract
+            contract = Contract()
+            contract.symbol = symbol
+            contract.secType = "FUT"
+            contract.exchange = self.get_exchange(symbol)
+            contract.currency = "USD"
+            contract.localSymbol = self.contract_map.get(symbol)
+            
+            if not contract.localSymbol:
+                raise ValueError(f"No contract mapping found for symbol {symbol}")
             
             # Create the order
             order = self.create_order(symbol, order_type, action, quantity, price)
@@ -155,7 +154,7 @@ class OrderManager(EWrapper, EClient):
             return current_order_id
             
         except Exception as e:
-            print(f"Error placing front month order: {str(e)}")
+            print(f"Error placing futures order: {str(e)}")
             raise
 
     def place_stock_order(self, symbol, order_type, action, quantity, price=None):
@@ -215,27 +214,8 @@ class OrderManager(EWrapper, EClient):
         """
         if not symbol:
             raise ValueError("Symbol is required")
-            
-        exchange_map = {
-            # Micro Futures
-            "MES": "CME",
-            "MGC": "COMEX",
-            "MNQ": "CME",
-            "MBT": "CME",
 
-            # Stocks
-            "AAPL": "NYSE",
-            "JPM": "NYSE",
-            "JNJ": "NYSE", 
-            "V": "NYSE",
-            "PG": "NYSE",
-            "MSFT": "NASDAQ",
-            "GOOGL": "NASDAQ",
-            "AMZN": "NASDAQ",
-            "FB": "NASDAQ",
-            "TSLA": "NASDAQ"
-        }
-        return exchange_map.get(symbol, "SMART")
+        return self.exchange_map.get(symbol, "SMART")
 
     def create_contract(self, symbol, secType):
         if not symbol or not secType:
@@ -247,16 +227,10 @@ class OrderManager(EWrapper, EClient):
             contract.secType = "FUT"
             contract.exchange = self.get_exchange(symbol)
             contract.currency = "USD"
-            print(f"Requesting contract details for {symbol} {secType}...")
-            self.reqContractDetails(1, contract)
+            contract.localSymbol = self.contract_map.get(symbol)
             
-            # Wait for contract details
-            timeout = time.time() + self.max_wait_time
-            while not self.contract_ready and time.time() < timeout:
-                time.sleep(0.1)
-                
-            if not self.contract_ready:
-                raise TimeoutError("Failed to receive contract details within timeout period")
+            if not contract.localSymbol:
+                raise ValueError(f"No contract mapping found for symbol {symbol}")
                 
             return contract
             
@@ -279,13 +253,6 @@ class OrderManager(EWrapper, EClient):
             
         # for futures contract, "MES1!" -> "MES"
         symbol = symbol[:-2] if symbol[-1] == '!' and symbol[-2].isdigit() else symbol
-
-        tick_size = {
-            "MES": 0.25,
-            "MGC": 0.10,
-            "MNQ": 0.25,
-            "MBT": 5.00
-        }
     
         if action.upper() == "BUY":
             signal = 1
@@ -308,8 +275,8 @@ class OrderManager(EWrapper, EClient):
             if lmt_price is None or lmt_price <= 0:
                 raise ValueError("Limit price must be positive")
                 
-            tick = tick_size.get(symbol, 1)
-            if symbol not in tick_size:
+            tick = self.tick_size.get(symbol, 1)
+            if symbol not in self.tick_size:
                 print("Warning: New symbol and tick size not supported, using default tick size of 1")
                 
             price = round(lmt_price / tick + signal) * tick
@@ -408,8 +375,6 @@ def main():
                 app.cancel_order_by_id(order_id)
                 print(f"Cancelled order {order_id}")
                 time.sleep(1)
-
-        
 
         time.sleep(5)  # Wait to see the order status
         app.cancel_all_orders()

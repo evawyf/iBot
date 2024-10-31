@@ -1,11 +1,6 @@
 from ibapi.order import Order
 
-tick_size = {
-    "MES": 0.25,
-    "MGC": 0.10,
-    "MNQ": 0.25,
-    "MBT": 1  # 5 index point
-}
+
 
 """
 Initializes order types
@@ -39,6 +34,14 @@ def create_market_order(action, totalQuantity, eTradeOnly=False, firmQuoteOnly=F
     return order
 
 def create_order(symbol, order_type, action, totalQuantity, price=0):
+
+    tick_size = {
+        "MES": 0.25,
+        "MGC": 0.10,
+        "MNQ": 0.25,
+        "MBT": 1  # 5 index point
+    }
+    
     if action.upper() == "BUY":
         signal = 1
     elif action.upper() == "SELL":

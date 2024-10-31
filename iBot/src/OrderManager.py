@@ -4,7 +4,7 @@ from ibapi.utils import iswrapper
 
 from utils.ib_contract import create_contract
 from ibapi.contract import Contract
-from utils.ib_order import create_limit_order, create_market_order
+from ibapi.order import Order
 
 import time
 import threading
@@ -16,7 +16,8 @@ def formatted_time_as_int():
     now = datetime.now()
     return int(now.strftime("%m%d%H%M%S"))
 
-class IBOrderManager(EWrapper, EClient):
+
+class OrderManager(EWrapper, EClient):
     """IB API wrapper for managing orders"""
     
     def __init__(self, port, max_wait_time=30):
@@ -26,29 +27,32 @@ class IBOrderManager(EWrapper, EClient):
         self.client_id = random.randint(2000, 2999)
         self.max_wait_time = max_wait_time
         self.connection_event = threading.Event()
-        self.order_id_lock = threading.Lock()
         self.openOrders = {}
         self.openContracts = {}
         self.task_name = "OrderManager"
         self.positions = {}
         self.position_event = threading.Event()
+        self.contract_details = []
+        self.contract_ready = False
 
         # Try to connect
         try:
             self.connect('127.0.0.1', self.port, self.client_id)
         except Exception as e:
             print(f"Error connecting: {e}")
-            return None
+            raise
 
         # Start the socket in a thread
         api_thread = threading.Thread(target=self.run, daemon=True)
         api_thread.start()
 
-        # Wait for nextValidId with a timeout
-        # if not self.connection_event.wait(timeout=self.max_wait_time):
-        #     print("Timeout waiting for nextValidId. Please check your connection.")
-        #     self.disconnect()
-        #     return None
+        # Wait for connection and nextOrderId
+        timeout = time.time() + max_wait_time
+        while not self.nextOrderId and time.time() < timeout:
+            time.sleep(0.1)
+            
+        if not self.nextOrderId:
+            raise TimeoutError("Failed to receive nextOrderId within timeout period")
 
         print(f"Received nextValidId: {self.nextOrderId}")
         print("Connection established.")
@@ -57,18 +61,133 @@ class IBOrderManager(EWrapper, EClient):
         """Disconnect from IB API"""
         print(f"Disconnecting client task [{self.task_name}] ...")
         self.disconnect()
-        print(f"Client disconnected.")
+        print("Client disconnected.")
 
     @iswrapper
     def nextValidId(self, orderId: int):
         super().nextValidId(orderId)
-        with self.order_id_lock:
-            self.nextOrderId = orderId
+        self.nextOrderId = orderId
         print(f"The next valid order id is: {self.nextOrderId}")
         self.connection_event.set()
 
+    def contractDetails(self, reqId, contractDetails):
+        print(f"ContractDetails. ReqId: {reqId}, Contract: {contractDetails.contract.localSymbol}")
+        self.contract_details.append(contractDetails)
+
+    def contractDetailsEnd(self, reqId):
+        print(f"ContractDetailsEnd. ReqId: {reqId}")
+        if self.contract_details:
+            self.contract_details.sort(key=lambda x: datetime.strptime(x.contractMonth, '%Y%m'))
+            front_contract = self.contract_details[0].contract
+            print(f"Using front month contract: {front_contract.localSymbol}")
+            self.contract_ready = True
+            self.contract_details = [front_contract]  # Store only the front month contract
+
+    def get_front_month_contract(self, symbol):
+        """
+        Get the front month futures contract for the given symbol.
+        Returns the contract with localSymbol.
+        """
+        if not symbol:
+            raise ValueError("Symbol is required")
+            
+        # Reset contract details
+        self.contract_details = []
+        self.contract_ready = False
+        
+        # Create a generic contract for the symbol
+        contract = Contract()
+        contract.symbol = symbol
+        contract.secType = "FUT"
+        contract.exchange = self.get_exchange(symbol)
+        contract.currency = "USD"
+        
+        # Request contract details
+        print(f"Requesting contract details for {symbol}...")
+        self.reqContractDetails(random.randint(100000, 999999), contract)
+        
+        # Wait for contract details
+        timeout = time.time() + self.max_wait_time
+        while not self.contract_ready and time.time() < timeout:
+            time.sleep(0.1)
+            
+        if not self.contract_ready:
+            raise TimeoutError("Failed to receive contract details within timeout period")
+        
+        if not self.contract_details:
+            raise ValueError(f"No contract details received for {symbol}")
+            
+        return self.contract_details[0]  # Return the front month contract
+
+    def place_futures_order(self, symbol, order_type, action, quantity, price=None):
+        """
+        Place an order for the front month futures contract
+        """
+        if not symbol or not order_type or not action or not quantity:
+            raise ValueError("Missing required parameters")
+            
+        if quantity <= 0:
+            raise ValueError("Quantity must be positive")
+            
+        if order_type == "LMT" and (price is None or price <= 0):
+            raise ValueError("Valid price required for limit orders")
+            
+        # For futures contract, "MES1!" -> "MES" 
+        symbol = symbol[:-2] if symbol[-1] == '!' and symbol[-2].isdigit() else symbol
+        try:
+            # Get the front month contract
+            contract = self.get_front_month_contract(symbol)
+            
+            # Create the order
+            order = self.create_order(symbol, order_type, action, quantity, price)
+            
+            # Place the order
+            current_order_id = self.nextOrderId
+            self.nextOrderId += 1
+            
+            print(f"Placing order for {contract.localSymbol}")
+            self.placeOrder(current_order_id, contract, order)
+            return current_order_id
+            
+        except Exception as e:
+            print(f"Error placing front month order: {str(e)}")
+            raise
+
+    def place_stock_order(self, symbol, order_type, action, quantity, price=None):
+        """
+        Place an order for stocks
+        """
+        if not symbol or not order_type or not action or not quantity:
+            raise ValueError("Missing required parameters")
+            
+        if quantity <= 0:
+            raise ValueError("Quantity must be positive")
+            
+        if order_type == "LMT" and (price is None or price <= 0):
+            raise ValueError("Valid price required for limit orders")
+            
+        try:
+            # Create stock contract
+            contract = self.create_contract(symbol, "STK")
+            
+            # Create the order
+            order = self.create_order(symbol, order_type, action, quantity, price)
+            
+            # Place the order
+            current_order_id = self.nextOrderId
+            self.nextOrderId += 1
+            
+            print(f"Placing order for {contract.symbol}")
+            self.placeOrder(current_order_id, contract, order)
+            return current_order_id
+            
+        except Exception as e:
+            print(f"Error placing stock order: {str(e)}")
+            raise
+
     @iswrapper
-    def orderStatus(self, orderId, status, filled, remaining, avgFillPrice, permId, parentId, lastFillPrice, clientId, whyHeld, mktCapPrice):
+    def orderStatus(self, orderId, status, filled, remaining, avgFillPrice, 
+                    permId, parentId, lastFillPrice, clientId, whyHeld, mktCapPrice):
         print(f"OrderStatus. Id: {orderId}, Status: {status}, Filled: {filled}, Remaining: {remaining}, LastFillPrice: {lastFillPrice}")
 
     @iswrapper
@@ -85,63 +204,134 @@ class IBOrderManager(EWrapper, EClient):
               f"Execution: {execution.execId}, Time: {execution.time}, Account: {execution.acctNumber}, Exchange: {execution.exchange}, "
               f"Side: {execution.side}, Shares: {execution.shares}, Price: {execution.price}")
 
-    def verify_contract(self, contract):
-        """Verify if the contract is valid using the TWS API."""
-        contract_details = []
-        
-        def contract_details_handler(req_id, details):
-            nonlocal contract_details
-            contract_details.append(details)
-        
-        self.contractDetails = contract_details_handler
-        req_id = self.reqContractDetails(contract)
-        
-        timeout = 5  # seconds
-        start_time = time.time()
-        while not contract_details and time.time() - start_time < timeout:
-            self.run()
-            time.sleep(0.1)
-        
-        self.contractDetails = None
-        
-        if contract_details:
-            print(f"Contract verified: {contract.symbol}")
-            return True
-        
-        print(f"Invalid contract: {contract.symbol}")
-        return False
+    def get_exchange(self, symbol):
+        """
+        Maps symbols to their most popular exchanges.
+        """
+        if not symbol:
+            raise ValueError("Symbol is required")
+            
+        exchange_map = {
+            # Micro Futures
+            "MES": "CME",
+            "MGC": "COMEX",
+            "MNQ": "CME",
+            "MBT": "CME",
 
-    def place_limit_order(self, symbol, contract_type, action, quantity, price):
-        """Place a limit order"""
-        with self.order_id_lock:
-            if self.nextOrderId is None:
-                print("Error: NextOrderId not received. Ensure connection is established.")
-                return
-            current_order_id = self.nextOrderId
-            self.nextOrderId += 1
+            # Stocks
+            "AAPL": "NYSE",
+            "JPM": "NYSE",
+            "JNJ": "NYSE", 
+            "V": "NYSE",
+            "PG": "NYSE",
+            "MSFT": "NASDAQ",
+            "GOOGL": "NASDAQ",
+            "AMZN": "NASDAQ",
+            "FB": "NASDAQ",
+            "TSLA": "NASDAQ"
+        }
+        return exchange_map.get(symbol, "SMART")
 
-        contract = create_contract(symbol, contract_type)
-        order = create_limit_order(action, quantity, price)
-        self.placeOrder(current_order_id, contract, order)
+    def create_contract(self, symbol, secType):
+        if not symbol or not secType:
+            raise ValueError("Symbol and secType are required")
+            
+        contract = Contract()
+        if secType in ["FUT", "CONTFUT", "futures", "fut"]:
+            contract.symbol = symbol[:-2] if symbol[-1] == '!' and symbol[-2].isdigit() else symbol
+            contract.secType = "FUT"
+            contract.exchange = self.get_exchange(symbol)
+            contract.currency = "USD"
+            print(f"Requesting contract details for {symbol} {secType}...")
+            self.reqContractDetails(1, contract)
+            
+            # Wait for contract details
+            timeout = time.time() + self.max_wait_time
+            while not self.contract_ready and time.time() < timeout:
+                time.sleep(0.1)
+                
+            if not self.contract_ready:
+                raise TimeoutError("Failed to receive contract details within timeout period")
+                
+            return contract
+            
+        elif secType in ["STK", "stock", "stk"]:
+            contract.symbol = symbol
+            contract.secType = "STK"
+            contract.exchange = self.get_exchange(symbol)
+            contract.currency = "USD"
+            return contract
+        
+        else:
+            raise ValueError(f"Invalid security type: {secType}")
 
-    def place_market_order(self, symbol, contract_type, action, quantity):
-        """Place a market order"""
-        with self.order_id_lock:
-            if self.nextOrderId is None:
-                print("Error: NextOrderId not received. Ensure connection is established.")
-                return
-            current_order_id = self.nextOrderId
-            self.nextOrderId += 1
+    def create_order(self, symbol, order_type, action, totalQuantity=1, lmt_price=None):
+        if not symbol or not order_type or not action or not totalQuantity:
+            raise ValueError("Missing required parameters")
+            
+        if totalQuantity <= 0:
+            raise ValueError("Total quantity must be positive")
+            
+        # for futures contract, "MES1!" -> "MES"
+        symbol = symbol[:-2] if symbol[-1] == '!' and symbol[-2].isdigit() else symbol
 
-        contract = create_contract(symbol, contract_type)
-        order = create_market_order(action, quantity)
-        self.placeOrder(current_order_id, contract, order)
+        tick_size = {
+            "MES": 0.25,
+            "MGC": 0.10,
+            "MNQ": 0.25,
+            "MBT": 5.00
+        }
+    
+        if action.upper() == "BUY":
+            signal = 1
+        elif action.upper() == "SELL":
+            signal = -1
+        else:
+            raise ValueError(f"Invalid action {action}, should be BUY or SELL")
+
+        order = Order()
+        order.action = action
+        order.totalQuantity = totalQuantity
+        order.eTradeOnly = False
+        order.firmQuoteOnly = False
+
+        if order_type == "MKT":
+            order.orderType = "MKT"
+            print(f"[MKT Order] created with action: {order.action}, totalQuantity: {order.totalQuantity}, orderType: {order.orderType}")
+        
+        elif order_type == "LMT":
+            if lmt_price is None or lmt_price <= 0:
+                raise ValueError("Limit price must be positive")
+                
+            tick = tick_size.get(symbol, 1)
+            if symbol not in tick_size:
+                print("Warning: New symbol and tick size not supported, using default tick size of 1")
+                
+            price = round(lmt_price / tick + signal) * tick
+
+            order.orderType = "LMT"
+            order.lmtPrice = price
+            print(f"[LMT Order] created with action: {order.action}, totalQuantity: {order.totalQuantity}, orderType: {order.orderType}, lmtPrice: {order.lmtPrice}")
+        
+        else:
+            raise ValueError(f"Invalid order type: {order_type}")
+        
+        return order
 
     def cancel_order_by_details(self, symbol, action, price):
         """Cancel an order by matching its details"""
-        for orderId, order in self.openOrders.items():
-            contract = self.openContracts[orderId]
+        if not symbol or not action or price is None:
+            raise ValueError("Missing required parameters")
             
+        if not self.openOrders:
+            print("No open orders to cancel")
+            return False
+            
+        for orderId, order in self.openOrders.items():
+            contract = self.openContracts.get(orderId)
+            if not contract:
+                continue
+                
             if (contract.symbol == symbol and 
                 order.action == action and 
                 order.lmtPrice == price):
@@ -163,6 +353,16 @@ class IBOrderManager(EWrapper, EClient):
         else:
             print("No open orders to cancel.")
 
+    def cancel_order_by_id(self, order_id):
+        """Cancel a specific unfilled order by order ID"""
+        if order_id not in self.openOrders:
+            print(f"No open order found with ID {order_id}")
+            return False
+            
+        print(f"Cancelling order: ID {order_id}")
+        self.cancelOrder(order_id)
+        return True
+
     @iswrapper
     def position(self, account: str, contract: Contract, position: float, avgCost: float):
         """Handle position updates"""
@@ -170,51 +370,56 @@ class IBOrderManager(EWrapper, EClient):
             symbol = contract.symbol
             self.positions[symbol] = position
             print(f"Position update received for {symbol}: {position}")
+            self.position_event.set()
             return position
         return None
 
-    # def request_positions(self):
-    #     """Request positions from IB"""
-    #     self.position_event.clear()
-    #     self.reqPositions()
-    #     if not self.position_event.wait(timeout=self.max_wait_time):
-    #         print("Timeout waiting for positions")
-    #     return self.positions
-
 def main():
     """Main entry point for testing"""
-    app = IBOrderManager(port=7497)
-    PRICE = 200
-
+    app = None
     try:
-        # positions = app.request_positions()
-        print(f">>>>>> Positions ALL: {app.positions}")
+        app = OrderManager(port=7497)
         
-        app.place_limit_order("MES", "FUT", "BUY", 1, PRICE)
-        time.sleep(5)
-
-        for i in range(1, 6):            
-            app.place_limit_order("MES", "FUT", "BUY", 1, 100)
-            position = app.positions.get("MES", 0)
-            print(f">>>>> Position MES: {position}")
-            time.sleep(5)
-
-        print("Test MGC now")
-        app.place_limit_order("MGC", "FUT", "BUY", 1, 100)  
-        time.sleep(1)
-        app.place_market_order("MGC", "FUT", "BUY", 1)
-        position = app.positions.get("MGC", 0)
-        print(f">>>>> Position MGC: {position}")
-        time.sleep(1)
-        app.place_limit_order("AAPL", "STK", "SELL", 1, 100)
-        time.sleep(5)
-        app.place_market_order("MGC", "FUT", "SELL", 1)
-        time.sleep(1)
+        # Test different order types
+        test_fut_orders = [
+            ("MES1!", "LMT", "BUY", 1, 800.00567),
+            ("MES2!", "LMT", "BUY", 1, 700.0056756),
+            ("MGC1!", "LMT", "BUY", 1, 700.0045645),
+            ("MNQ1!", "LMT", "BUY", 1, 700.0023423),
+            ("MBT1!", "LMT", "BUY", 1, 700.0045645)
+        ]
         
+        for symbol, order_type, action, qty, price in test_fut_orders:
+            order_id = app.place_futures_order(symbol, order_type, action, qty, price)
+            print(f"Placed FUT order {order_id}")
+            time.sleep(1)
+            
+            # Test cancelling individual order
+            if symbol == "MGC1!":
+                app.cancel_order_by_id(order_id)
+                print(f"Cancelled order {order_id}")
+                time.sleep(1)
+
+        test_stk_orders = [
+            ("AAPL", "LMT", "BUY", 1, 150.00), 
+            ("GOOGL", "LMT", "BUY", 1, 153.00),
+            ("AMZN", "LMT", "BUY", 1, 155.00)
+        ]
+        
+        for symbol, order_type, action, qty, price in test_stk_orders:
+            order_id = app.place_stock_order(symbol, order_type, action, qty, price)
+            print(f"Placed STK order {order_id}")
+            time.sleep(1)
+
+        time.sleep(5)  # Wait to see the order status
         app.cancel_all_orders()
-
+        
+    except Exception as e:
+        print(f"Error in main: {str(e)}")
+        raise
     finally:
-        app.ib_disconnect()
+        if app:
+            app.ib_disconnect()
 
 if __name__ == "__main__":
     main()

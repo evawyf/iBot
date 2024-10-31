@@ -26,6 +26,7 @@ class OrderManager(EWrapper, EClient):
         self.task_name = "OrderManager"
         self.positions = {}
         self.position_event = threading.Event()
+        self.tick_given = 2
 
         # Contract mapping
         self.contract_map = {
@@ -279,7 +280,7 @@ class OrderManager(EWrapper, EClient):
             if symbol not in self.tick_size:
                 print("Warning: New symbol and tick size not supported, using default tick size of 1")
                 
-            price = round(lmt_price / tick + signal) * tick
+            price = round(lmt_price / tick) * tick + (signal * self.tick_given * tick)
 
             order.orderType = "LMT"
             order.lmtPrice = price
